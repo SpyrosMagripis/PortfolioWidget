@@ -1,8 +1,21 @@
+import java.util.Properties
+
+// Load Bitvavo creds from bitvavo.properties
+val bitvavoProps = Properties().apply {
+    val f = rootProject.file("bitvavo.properties")
+    if (f.exists()) load(f.inputStream())
+}
+val bitvavoApiKey    = bitvavoProps.getProperty("BITVAVO_API_KEY", "")
+val bitvavoApiSecret = bitvavoProps.getProperty("BITVAVO_API_SECRET", "")
+
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+
 
 android {
     namespace = "com.spymag.portfoliowidget"
@@ -10,22 +23,17 @@ android {
     android.buildFeatures.buildConfig = true
 
     defaultConfig {
+        if (bitvavoApiKey.isEmpty() || bitvavoApiSecret.isEmpty()) {
+            throw GradleException("Define BITVAVO_API_KEY/SECRET in bitvavo.properties")
+        }
+        buildConfigField("String","BITVAVO_API_KEY",  "\"$bitvavoApiKey\"")
+        buildConfigField("String","BITVAVO_API_SECRET","\"$bitvavoApiSecret\"")
+
         applicationId = "com.spymag.portfoliowidget"
         minSdk = 33
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
-
-        buildConfigField(
-            "String",
-            "BITVAVO_API_KEY",
-            "\"${(project.findProperty("BITVAVO_API_KEY") as String?) ?: ""}\""
-        )
-        buildConfigField(
-            "String",
-            "BITVAVO_API_SECRET",
-            "\"${(project.findProperty("BITVAVO_API_SECRET") as String?) ?: ""}\""
-        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -24,7 +24,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
     companion object {
         private const val TAG = "PortfolioWidget"
         private const val ACTION_UPDATE = "com.spymag.PORTFOLIO_UPDATE"
-        private const val UPDATE_INTERVAL = 20_000L  // 20 seconds
+        private const val UPDATE_INTERVAL = 60_000L  // 60 seconds
     }
 
     override fun onEnabled(context: Context) {
@@ -43,7 +43,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
         if (intent.action == AppWidgetManager.ACTION_APPWIDGET_UPDATE || intent.action == ACTION_UPDATE) {
             Thread {
                 // Optional: test public endpoint to verify network
-                testPublicEndpoint(context)
+                //testPublicEndpoint(context)
 
                 // Fetch only the total portfolio value
                 val totalValue = try {
