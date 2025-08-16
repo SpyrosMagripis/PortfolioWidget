@@ -50,35 +50,43 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                 // Optional: test public endpoint to verify network
                 //testPublicEndpoint(context)
 
-                // Fetch only the total portfolio value
-                val totalValue = try {
+                // Fetch totals from Bitvavo and Trading212
+                val bitvavoValue = try {
                     fetchTotalPortfolioValue()
                 } catch (e: Exception) {
                     Log.e(TAG, "Error fetching Bitvavo total value", e)
                     "–"
                 }
 
-                Log.d(TAG, "Fetched Bitvavo total value: $totalValue")
+                val trading212Value = try {
+                    fetchTrading212TotalValue()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error fetching Trading212 total value", e)
+                    "–"
+                }
 
-                // Update widget with the total value
-                updateWidgetTotal(context, totalValue)
+                Log.d(TAG, "Fetched Bitvavo total value: $bitvavoValue")
+                Log.d(TAG, "Fetched Trading212 total value: $trading212Value")
+
+                // Update widget with the totals
+                updateWidgetTotal(context, bitvavoValue, trading212Value)
                 scheduleNextUpdate(context)
             }.start()
         }
     }
 
-    private fun updateWidgetTotal(context: Context, totalValue: String) {
+    private fun updateWidgetTotal(context: Context, bitvavoValue: String, trading212Value: String) {
         val mgr = AppWidgetManager.getInstance(context)
         val ids = mgr.getAppWidgetIds(ComponentName(context, PortfolioWidgetProvider::class.java))
         for (appWidgetId in ids) {
             val rv = RemoteViews(context.packageName, R.layout.widget_portfolio)
             // Display Bitvavo total
-            rv.setTextViewText(R.id.tvValue1, "Bitvavo total: $totalValue")
-            // Make the TextView clickable to trigger an update
-            rv.setOnClickPendingIntent(
-                R.id.tvValue1,
-                pendingIntent(context)
-            )
+            rv.setTextViewText(R.id.tvValue1, "Bitvavo total: $bitvavoValue")
+            // Display Trading212 total
+            rv.setTextViewText(R.id.tvValue2, "Trading212 total: $trading212Value")
+            // Make the TextViews clickable to trigger an update
+            rv.setOnClickPendingIntent(R.id.tvValue1, pendingIntent(context))
+            rv.setOnClickPendingIntent(R.id.tvValue2, pendingIntent(context))
             mgr.updateAppWidget(appWidgetId, rv)
         }
     }
@@ -207,6 +215,51 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                 }
             }
         }
+        return "€%.2f".format(total)
+    }
+
+    /**
+     * Fetches the total portfolio value from Trading212 by summing
+     * quantity × currentPrice (already in account currency).
+     */
+    private fun fetchTrading212TotalValue(): String {
+        val apiKey = BuildConfig.TRADING212_API_KEY
+        val baseUrl = "https://live.trading212.com"
+        val client = OkHttpClient()
+
+        // 1) Verify authentication
+        val infoReq = Request.Builder()
+            .url("$baseUrl/api/v0/equity/account/info")
+            .addHeader("Authorization", apiKey)
+            .get()
+            .build()
+
+        client.newCall(infoReq).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                throw Exception("Trading212 auth failed: ${resp.code}")
+            }
+        }
+
+        // 2) Fetch portfolio positions
+        val portReq = Request.Builder()
+            .url("$baseUrl/api/v0/equity/portfolio")
+            .addHeader("Authorization", apiKey)
+            .get()
+            .build()
+
+        val portJson = client.newCall(portReq).execute().use { it.body?.string().orEmpty() }
+        Log.d(TAG, "Trading212 portfolio response: $portJson")
+        val positions = JSONArray(portJson)
+
+        // 3) Sum quantity × currentPrice
+        var total = 0.0
+        for (i in 0 until positions.length()) {
+            val p = positions.getJSONObject(i)
+            val quantity = p.optDouble("quantity", 0.0)
+            val currentPrice = p.optDouble("currentPrice", 0.0)
+            total += quantity * currentPrice
+        }
+
         return "€%.2f".format(total)
     }
 }
