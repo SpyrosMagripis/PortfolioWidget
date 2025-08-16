@@ -15,12 +15,17 @@ import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
 
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.RemoteViews
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -40,9 +45,13 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
         private const val PREF_HIDE_VALUES = "hide_values"
         private const val PREF_BITVAVO = "bitvavo_value"
         private const val PREF_TRADING212 = "trading212_value"
+        private const val PREF_BITVAVO_TIME = "bitvavo_time"
+        private const val PREF_TRADING212_TIME = "trading212_time"
         private const val UPDATE_INTERVAL = 15 * 60 * 1000L
         private const val DOUBLE_TAP_TIMEOUT = 400L
         private var lastClickTime = 0L
+        private val handler = Handler(Looper.getMainLooper())
+        private var singleTapRunnable: Runnable? = null
 
         fun pendingIntent(context: Context): PendingIntent {
             val intent = Intent(context, PortfolioWidgetProvider::class.java).apply {
@@ -86,17 +95,21 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
         when (intent.action) {
             ACTION_TAP -> {
                 val now = System.currentTimeMillis()
-                if (now - lastClickTime < DOUBLE_TAP_TIMEOUT) {
+                if (singleTapRunnable != null && now - lastClickTime < DOUBLE_TAP_TIMEOUT) {
+                    handler.removeCallbacks(singleTapRunnable!!)
+                    singleTapRunnable = null
                     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                     val hidden = prefs.getBoolean(PREF_HIDE_VALUES, false)
                     prefs.edit().putBoolean(PREF_HIDE_VALUES, !hidden).apply()
-                    val bitvavo = prefs.getString(PREF_BITVAVO, "–") ?: "–"
-                    val trading = prefs.getString(PREF_TRADING212, "–") ?: "–"
-                    updateWidgetTotal(context, bitvavo, trading)
+                    refreshWidgetFromPrefs(context)
                 } else {
-                    triggerUpdate(context)
+                    lastClickTime = now
+                    singleTapRunnable = Runnable {
+                        triggerUpdate(context)
+                        singleTapRunnable = null
+                    }
+                    handler.postDelayed(singleTapRunnable!!, DOUBLE_TAP_TIMEOUT)
                 }
-                lastClickTime = now
             }
             AppWidgetManager.ACTION_APPWIDGET_UPDATE, ACTION_UPDATE -> {
                 triggerUpdate(context)
@@ -138,10 +151,26 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
 
     private fun updateWidgetTotal(context: Context, bitvavoValue: String, trading212Value: String) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString(PREF_BITVAVO, bitvavoValue)
-            .putString(PREF_TRADING212, trading212Value)
-            .apply()
+        val editor = prefs.edit()
+        val now = System.currentTimeMillis()
+        if (bitvavoValue != "–") {
+            editor.putString(PREF_BITVAVO, bitvavoValue)
+            editor.putLong(PREF_BITVAVO_TIME, now)
+        }
+        if (trading212Value != "–") {
+            editor.putString(PREF_TRADING212, trading212Value)
+            editor.putLong(PREF_TRADING212_TIME, now)
+        }
+        editor.apply()
+        refreshWidgetFromPrefs(context)
+    }
+
+    private fun refreshWidgetFromPrefs(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val bitvavo = prefs.getString(PREF_BITVAVO, "–") ?: "–"
+        val trading = prefs.getString(PREF_TRADING212, "–") ?: "–"
+        val bitTime = prefs.getLong(PREF_BITVAVO_TIME, 0L)
+        val tradingTime = prefs.getLong(PREF_TRADING212_TIME, 0L)
 
         val hidden = prefs.getBoolean(PREF_HIDE_VALUES, false)
         val mgr = AppWidgetManager.getInstance(context)
@@ -152,12 +181,20 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                 rv.setTextViewText(R.id.tvValue1, "*****")
                 rv.setTextViewText(R.id.tvValue2, "*****")
             } else {
-                rv.setTextViewText(R.id.tvValue1, "Bitvavo total: $bitvavoValue")
-                rv.setTextViewText(R.id.tvValue2, "Trading212 total: $trading212Value")
+                val bitText = "Bitvavo total: $bitvavo (${formatTime(bitTime)})"
+                val tradingText = "Trading212 total: $trading (${formatTime(tradingTime)})"
+                rv.setTextViewText(R.id.tvValue1, bitText)
+                rv.setTextViewText(R.id.tvValue2, tradingText)
             }
             rv.setOnClickPendingIntent(R.id.widget_root, tapPendingIntent(context))
             mgr.updateAppWidget(appWidgetId, rv)
         }
+    }
+
+    private fun formatTime(timestamp: Long): String {
+        if (timestamp == 0L) return "N/A"
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+        return sdf.format(Date(timestamp))
     }
 
     private fun scheduleNextUpdate(context: Context) {
