@@ -15,13 +15,10 @@ import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
 
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.widget.RemoteViews
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
 import org.json.JSONArray
 import org.json.JSONObject
 import javax.crypto.Mac
@@ -43,6 +40,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
         private const val PREF_HIDE_VALUES = "hide_values"
         private const val PREF_BITVAVO = "bitvavo_value"
         private const val PREF_TRADING212 = "trading212_value"
+        private const val UPDATE_INTERVAL = 15 * 60 * 1000L
         private const val DOUBLE_TAP_TIMEOUT = 400L
         private var lastClickTime = 0L
 
