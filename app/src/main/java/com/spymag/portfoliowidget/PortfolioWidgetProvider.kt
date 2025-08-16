@@ -1,8 +1,10 @@
 package com.spymag.portfoliowidget
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 
@@ -34,7 +36,14 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
 
     companion object {
         private const val ACTION_UPDATE = "com.spymag.PORTFOLIO_UPDATE"
+        private const val ACTION_TAP = "com.spymag.PORTFOLIO_TAP"
         private const val UNIQUE_WORK_NAME = "PortfolioUpdateWork"
+        private const val PREFS_NAME = "portfolio_widget_prefs"
+        private const val PREF_HIDE_VALUES = "hide_values"
+        private const val PREF_BITVAVO = "bitvavo_value"
+        private const val PREF_TRADING212 = "trading212_value"
+        private const val DOUBLE_TAP_TIMEOUT = 400L
+        private var lastClickTime = 0L
 
         fun pendingIntent(context: Context): PendingIntent {
             val intent = Intent(context, PortfolioWidgetProvider::class.java).apply {
@@ -43,6 +52,18 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
             return PendingIntent.getBroadcast(
                 context,
                 0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        fun tapPendingIntent(context: Context): PendingIntent {
+            val intent = Intent(context, PortfolioWidgetProvider::class.java).apply {
+                action = ACTION_TAP
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                1,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -63,52 +84,79 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action == AppWidgetManager.ACTION_APPWIDGET_UPDATE || intent.action == ACTION_UPDATE) {
-
-            WorkManager.getInstance(context)
-                .enqueue(OneTimeWorkRequestBuilder<PortfolioWorker>().build())
-
-            Thread {
-                // Optional: test public endpoint to verify network
-                //testPublicEndpoint(context)
-
-                // Fetch totals from Bitvavo and Trading212
-                val bitvavoValue = try {
-                    fetchTotalPortfolioValue()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error fetching Bitvavo total value", e)
-                    "–"
+        when (intent.action) {
+            ACTION_TAP -> {
+                val now = System.currentTimeMillis()
+                if (now - lastClickTime < DOUBLE_TAP_TIMEOUT) {
+                    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    val hidden = prefs.getBoolean(PREF_HIDE_VALUES, false)
+                    prefs.edit().putBoolean(PREF_HIDE_VALUES, !hidden).apply()
+                    val bitvavo = prefs.getString(PREF_BITVAVO, "–") ?: "–"
+                    val trading = prefs.getString(PREF_TRADING212, "–") ?: "–"
+                    updateWidgetTotal(context, bitvavo, trading)
+                } else {
+                    triggerUpdate(context)
                 }
-
-                val trading212Value = try {
-                    fetchTrading212TotalValue()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error fetching Trading212 total value", e)
-                    "–"
-                }
-
-                Log.d(TAG, "Fetched Bitvavo total value: $bitvavoValue")
-                Log.d(TAG, "Fetched Trading212 total value: $trading212Value")
-
-                // Update widget with the totals
-                updateWidgetTotal(context, bitvavoValue, trading212Value)
-                scheduleNextUpdate(context)
-            }.start()
+                lastClickTime = now
+            }
+            AppWidgetManager.ACTION_APPWIDGET_UPDATE, ACTION_UPDATE -> {
+                triggerUpdate(context)
+            }
         }
     }
 
+    private fun triggerUpdate(context: Context) {
+        WorkManager.getInstance(context)
+            .enqueue(OneTimeWorkRequestBuilder<PortfolioWorker>().build())
+
+        Thread {
+            // Optional: test public endpoint to verify network
+            //testPublicEndpoint(context)
+
+            // Fetch totals from Bitvavo and Trading212
+            val bitvavoValue = try {
+                fetchTotalPortfolioValue()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching Bitvavo total value", e)
+                "–"
+            }
+
+            val trading212Value = try {
+                fetchTrading212TotalValue()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching Trading212 total value", e)
+                "–"
+            }
+
+            Log.d(TAG, "Fetched Bitvavo total value: $bitvavoValue")
+            Log.d(TAG, "Fetched Trading212 total value: $trading212Value")
+
+            // Update widget with the totals
+            updateWidgetTotal(context, bitvavoValue, trading212Value)
+            scheduleNextUpdate(context)
+        }.start()
+    }
+
     private fun updateWidgetTotal(context: Context, bitvavoValue: String, trading212Value: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString(PREF_BITVAVO, bitvavoValue)
+            .putString(PREF_TRADING212, trading212Value)
+            .apply()
+
+        val hidden = prefs.getBoolean(PREF_HIDE_VALUES, false)
         val mgr = AppWidgetManager.getInstance(context)
         val ids = mgr.getAppWidgetIds(ComponentName(context, PortfolioWidgetProvider::class.java))
         for (appWidgetId in ids) {
             val rv = RemoteViews(context.packageName, R.layout.widget_portfolio)
-            // Display Bitvavo total
-            rv.setTextViewText(R.id.tvValue1, "Bitvavo total: $bitvavoValue")
-            // Display Trading212 total
-            rv.setTextViewText(R.id.tvValue2, "Trading212 total: $trading212Value")
-            // Make the TextViews clickable to trigger an update
-            rv.setOnClickPendingIntent(R.id.tvValue1, pendingIntent(context))
-            rv.setOnClickPendingIntent(R.id.tvValue2, pendingIntent(context))
+            if (hidden) {
+                rv.setTextViewText(R.id.tvValue1, "*****")
+                rv.setTextViewText(R.id.tvValue2, "*****")
+            } else {
+                rv.setTextViewText(R.id.tvValue1, "Bitvavo total: $bitvavoValue")
+                rv.setTextViewText(R.id.tvValue2, "Trading212 total: $trading212Value")
+            }
+            rv.setOnClickPendingIntent(R.id.widget_root, tapPendingIntent(context))
             mgr.updateAppWidget(appWidgetId, rv)
         }
     }
