@@ -8,8 +8,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.widget.RemoteViews
 import okhttp3.OkHttpClient
@@ -25,6 +23,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
         private const val TAG = "PortfolioWidget"
         private const val ACTION_UPDATE = "com.spymag.PORTFOLIO_UPDATE"
         private const val UPDATE_INTERVAL = 60_000L  // 60 seconds
+        private const val CREDENTIALS_URL = "https://example.com/credentials"
     }
 
     override fun onEnabled(context: Context) {
@@ -45,30 +44,49 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                 // Optional: test public endpoint to verify network
                 //testPublicEndpoint(context)
 
-                // Fetch only the total portfolio value
-                val totalValue = try {
-                    fetchTotalPortfolioValue()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error fetching Bitvavo total value", e)
-                    "–"
+                val creds = fetchCredentials()
+
+                val bitvavoTotal = if (creds != null &&
+                    !creds.bitvavoKey.isNullOrBlank() &&
+                    !creds.bitvavoSecret.isNullOrBlank()
+                ) {
+                    try {
+                        fetchBitvavoTotalValue(creds.bitvavoKey!!, creds.bitvavoSecret!!)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error fetching Bitvavo total value", e)
+                        "–"
+                    }
+                } else {
+                    Log.w(TAG, "Missing Bitvavo credentials")
+                    "Credentials unavailable"
                 }
 
-                Log.d(TAG, "Fetched Bitvavo total value: $totalValue")
+                val trading212Total = if (creds != null &&
+                    !creds.trading212Key.isNullOrBlank()
+                ) {
+                    fetchTrading212PortfolioValue(creds.trading212Key!!)
+                } else {
+                    Log.w(TAG, "Missing Trading212 credentials")
+                    "Credentials unavailable"
+                }
 
-                // Update widget with the total value
-                updateWidgetTotal(context, totalValue)
+                Log.d(TAG, "Fetched Bitvavo total value: $bitvavoTotal")
+                Log.d(TAG, "Fetched Trading212 total value: $trading212Total")
+
+                // Update widget with the total values
+                updateWidgetTotals(context, bitvavoTotal, trading212Total)
                 scheduleNextUpdate(context)
             }.start()
         }
     }
 
-    private fun updateWidgetTotal(context: Context, totalValue: String) {
+    private fun updateWidgetTotals(context: Context, bitvavoValue: String, trading212Value: String) {
         val mgr = AppWidgetManager.getInstance(context)
         val ids = mgr.getAppWidgetIds(ComponentName(context, PortfolioWidgetProvider::class.java))
         for (appWidgetId in ids) {
             val rv = RemoteViews(context.packageName, R.layout.widget_portfolio)
-            // Display Bitvavo total
-            rv.setTextViewText(R.id.tvValue1, "Bitvavo total: $totalValue")
+            val display = "Bitvavo total: $bitvavoValue\nTrading212 total: $trading212Value"
+            rv.setTextViewText(R.id.tvValue1, display)
             // Make the TextView clickable to trigger an update
             rv.setOnClickPendingIntent(
                 R.id.tvValue1,
@@ -150,9 +168,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
      * Fetches the total portfolio value by summing available and inOrder balances,
      * converting each to EUR using public price endpoints.
      */
-    private fun fetchTotalPortfolioValue(): String {
-        val apiKey = BuildConfig.BITVAVO_API_KEY
-        val apiSecret = BuildConfig.BITVAVO_API_SECRET
+    private fun fetchBitvavoTotalValue(apiKey: String, apiSecret: String): String {
         val timestamp = System.currentTimeMillis().toString()
         val method = "GET"
         val requestPath = "/v2/balance"
@@ -206,5 +222,65 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
             }
         }
         return "€%.2f".format(total)
+    }
+
+    private data class Credentials(
+        val bitvavoKey: String?,
+        val bitvavoSecret: String?,
+        val trading212Key: String?
+    )
+
+    private fun fetchCredentials(): Credentials? {
+        return try {
+            val client = OkHttpClient()
+            val req = Request.Builder()
+                .url(CREDENTIALS_URL)
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.e(TAG, "Credential fetch failed: ${'$'}{resp.code}")
+                    return null
+                }
+                val body = resp.body?.string().orEmpty()
+                val obj = JSONObject(body)
+                val bitvavoKey = obj.optString("bitvavoApiKey")
+                val bitvavoSecret = obj.optString("bitvavoApiSecret")
+                val trading212Key = obj.optString("trading212ApiKey")
+                if (bitvavoKey.isBlank() && bitvavoSecret.isBlank() && trading212Key.isBlank()) {
+                    Log.e(TAG, "Credentials missing or invalid")
+                    null
+                } else {
+                    Credentials(bitvavoKey, bitvavoSecret, trading212Key)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Credential fetch error", e)
+            null
+        }
+    }
+
+    private fun fetchTrading212PortfolioValue(apiKey: String): String {
+        return try {
+            val client = OkHttpClient()
+            val req = Request.Builder()
+                .url("https://example.com/trading212/portfolio")
+                .addHeader("Authorization", "Bearer $apiKey")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.e(TAG, "Trading212 fetch failed: ${'$'}{resp.code}")
+                    return "–"
+                }
+                val body = resp.body?.string().orEmpty()
+                val obj = JSONObject(body)
+                val total = obj.optDouble("totalValue", 0.0)
+                "€%.2f".format(total)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching Trading212 value", e)
+            "–"
+        }
     }
 }

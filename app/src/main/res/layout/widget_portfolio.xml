@@ -9,6 +9,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="—"
-        android:textSize="14sp"/>
+        android:textSize="14sp"
+        android:maxLines="5"/>
     <!-- You can add tvValue2…tvValue5 or just concatenate into one TextView -->
 </FrameLayout>
