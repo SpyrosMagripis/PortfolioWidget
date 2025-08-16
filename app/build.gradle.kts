@@ -8,6 +8,13 @@ val bitvavoProps = Properties().apply {
 val bitvavoApiKey    = bitvavoProps.getProperty("BITVAVO_API_KEY", "")
 val bitvavoApiSecret = bitvavoProps.getProperty("BITVAVO_API_SECRET", "")
 
+// Load Trading212 API key from trading212.properties
+val trading212Props = Properties().apply {
+    val f = rootProject.file("trading212.properties")
+    if (f.exists()) load(f.inputStream())
+}
+val trading212ApiKey = trading212Props.getProperty("TRADING212_API_KEY", "")
+
 
 plugins {
     alias(libs.plugins.android.application)
@@ -26,8 +33,12 @@ android {
         if (bitvavoApiKey.isEmpty() || bitvavoApiSecret.isEmpty()) {
             throw GradleException("Define BITVAVO_API_KEY/SECRET in bitvavo.properties")
         }
+        if (trading212ApiKey.isEmpty()) {
+            throw GradleException("Define TRADING212_API_KEY in trading212.properties")
+        }
         buildConfigField("String","BITVAVO_API_KEY",  "\"$bitvavoApiKey\"")
         buildConfigField("String","BITVAVO_API_SECRET","\"$bitvavoApiSecret\"")
+        buildConfigField("String","TRADING212_API_KEY","\"$trading212ApiKey\"")
 
         applicationId = "com.spymag.portfoliowidget"
         minSdk = 33
