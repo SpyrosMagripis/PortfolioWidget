@@ -14,12 +14,17 @@ import android.util.Log
 import android.widget.RemoteViews
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.TimeUnit
 import org.json.JSONArray
 import org.json.JSONObject
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 class PortfolioWidgetProvider : AppWidgetProvider() {
+
+    private val client = OkHttpClient.Builder()
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
 
     companion object {
         private const val TAG = "PortfolioWidget"
@@ -111,7 +116,6 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
     private fun testPublicEndpoint(context: Context) {
         Thread {
             try {
-                val client = OkHttpClient()
                 val req = Request.Builder()
                     .url("https://api.bitvavo.com/v2/markets")
                     .get()
@@ -159,7 +163,6 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
 
         // 1) Authenticated request for balances
         val signature = sign(apiSecret, timestamp, method, requestPath)
-        val client = OkHttpClient()
         val req = Request.Builder()
             .url("https://api.bitvavo.com$requestPath")
             .addHeader("Bitvavo-Access-Key", apiKey)
@@ -175,7 +178,6 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
 
         // 2) Sum total value in EUR
         var total = 0.0
-        val publicClient = OkHttpClient()
         for (i in 0 until balances.length()) {
             val obj = balances.getJSONObject(i)
             val available = obj.optDouble("available", 0.0)
@@ -193,7 +195,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                         .url("https://api.bitvavo.com/v2/ticker/price?market=$market")
                         .get()
                         .build()
-                    publicClient.newCall(priceReq).execute().use { pr ->
+                    client.newCall(priceReq).execute().use { pr ->
                         val priceJson = pr.body?.string().orEmpty()
                         Log.d(TAG, "Ticker $market response: $priceJson")
                         val priceObj = JSONObject(priceJson)
