@@ -35,6 +35,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
         .build()
 
     companion object {
+        private const val TAG = "PortfolioWidgetProvider"
         private const val ACTION_UPDATE = "com.spymag.PORTFOLIO_UPDATE"
         private const val ACTION_TAP = "com.spymag.PORTFOLIO_TAP"
         private const val UNIQUE_WORK_NAME = "PortfolioUpdateWork"
