@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">PortfolioWidget</string>
+    <string name="toggle_visibility">Toggle visibility</string>
 </resources>
