@@ -1,6 +1,6 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
-    android:layout_width="wrap_content"
+    android:layout_width="200dp"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:background="@android:color/white"
@@ -16,21 +16,26 @@
 
     <LinearLayout
         android:id="@+id/content_layout"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_weight="1"
         android:orientation="vertical">
 
         <TextView
             android:id="@+id/tvValue1"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
             android:text="—"
             android:textSize="14sp"/>
 
         <TextView
             android:id="@+id/tvValue2"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
             android:text="—"
             android:textSize="14sp"/>
     </LinearLayout>

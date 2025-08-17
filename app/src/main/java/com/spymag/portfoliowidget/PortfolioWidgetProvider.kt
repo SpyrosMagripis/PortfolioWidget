@@ -171,8 +171,8 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
         for (appWidgetId in ids) {
             val rv = RemoteViews(context.packageName, R.layout.widget_portfolio)
             if (hidden) {
-                rv.setTextViewText(R.id.tvValue1, "*****")
-                rv.setTextViewText(R.id.tvValue2, "*****")
+                rv.setTextViewText(R.id.tvValue1, "Bitvavo total: ******")
+                rv.setTextViewText(R.id.tvValue2, "Trading212 total: ******")
                 rv.setImageViewResource(R.id.ivToggle, R.drawable.ic_visibility_off)
             } else {
                 val bitText = "Bitvavo total: $bitvavo (${formatTime(bitTime)})"
