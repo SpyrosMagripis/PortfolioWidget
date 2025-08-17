@@ -95,6 +95,15 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
         WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_WORK_NAME)
     }
 
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetIds: IntArray
+    ) {
+        super.onUpdate(context, appWidgetManager, appWidgetIds)
+        triggerUpdate(context)
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         when (intent.action) {
