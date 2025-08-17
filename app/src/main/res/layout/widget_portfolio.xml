@@ -8,8 +8,8 @@
 
     <ImageView
         android:id="@+id/ivToggle"
-        android:layout_width="24dp"
-        android:layout_height="24dp"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
         android:src="@drawable/ic_visibility"
         android:contentDescription="@string/toggle_visibility"
         android:layout_marginEnd="8dp"
