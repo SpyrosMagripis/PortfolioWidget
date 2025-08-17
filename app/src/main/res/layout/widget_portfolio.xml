@@ -12,7 +12,8 @@
         android:layout_height="24dp"
         android:src="@drawable/ic_visibility"
         android:contentDescription="@string/toggle_visibility"
-        android:layout_marginEnd="8dp"/>
+        android:layout_marginEnd="8dp"
+        android:layout_gravity="center_vertical"/>
 
     <LinearLayout
         android:id="@+id/content_layout"
