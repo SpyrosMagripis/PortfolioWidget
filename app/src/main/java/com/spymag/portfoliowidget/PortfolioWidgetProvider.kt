@@ -15,8 +15,6 @@ import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
 
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.widget.RemoteViews
 import okhttp3.OkHttpClient
@@ -39,7 +37,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
     companion object {
         private const val TAG = "PortfolioWidgetProvider"
         private const val ACTION_UPDATE = "com.spymag.PORTFOLIO_UPDATE"
-        private const val ACTION_TAP = "com.spymag.PORTFOLIO_TAP"
+        private const val ACTION_TOGGLE = "com.spymag.PORTFOLIO_TOGGLE"
         private const val UNIQUE_WORK_NAME = "PortfolioUpdateWork"
         private const val PREFS_NAME = "portfolio_widget_prefs"
         private const val PREF_HIDE_VALUES = "hide_values"
@@ -48,11 +46,6 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
         private const val PREF_BITVAVO_TIME = "bitvavo_time"
         private const val PREF_TRADING212_TIME = "trading212_time"
         private const val UPDATE_INTERVAL = 15 * 60 * 1000L
-        private const val DOUBLE_TAP_TIMEOUT = 400L
-        private var lastClickTime = 0L
-        private val handler = Handler(Looper.getMainLooper())
-        private var singleTapRunnable: Runnable? = null
-
         fun pendingIntent(context: Context): PendingIntent {
             val intent = Intent(context, PortfolioWidgetProvider::class.java).apply {
                 action = ACTION_UPDATE
@@ -65,13 +58,25 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        fun tapPendingIntent(context: Context): PendingIntent {
+        fun updatePendingIntent(context: Context): PendingIntent {
             val intent = Intent(context, PortfolioWidgetProvider::class.java).apply {
-                action = ACTION_TAP
+                action = ACTION_UPDATE
             }
             return PendingIntent.getBroadcast(
                 context,
                 1,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        fun togglePendingIntent(context: Context): PendingIntent {
+            val intent = Intent(context, PortfolioWidgetProvider::class.java).apply {
+                action = ACTION_TOGGLE
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                2,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -93,23 +98,11 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         when (intent.action) {
-            ACTION_TAP -> {
-                val now = System.currentTimeMillis()
-                if (singleTapRunnable != null && now - lastClickTime < DOUBLE_TAP_TIMEOUT) {
-                    handler.removeCallbacks(singleTapRunnable!!)
-                    singleTapRunnable = null
-                    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    val hidden = prefs.getBoolean(PREF_HIDE_VALUES, false)
-                    prefs.edit().putBoolean(PREF_HIDE_VALUES, !hidden).apply()
-                    refreshWidgetFromPrefs(context)
-                } else {
-                    lastClickTime = now
-                    singleTapRunnable = Runnable {
-                        triggerUpdate(context)
-                        singleTapRunnable = null
-                    }
-                    handler.postDelayed(singleTapRunnable!!, DOUBLE_TAP_TIMEOUT)
-                }
+            ACTION_TOGGLE -> {
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val hidden = prefs.getBoolean(PREF_HIDE_VALUES, false)
+                prefs.edit().putBoolean(PREF_HIDE_VALUES, !hidden).apply()
+                refreshWidgetFromPrefs(context)
             }
             AppWidgetManager.ACTION_APPWIDGET_UPDATE, ACTION_UPDATE -> {
                 triggerUpdate(context)
@@ -180,13 +173,16 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
             if (hidden) {
                 rv.setTextViewText(R.id.tvValue1, "*****")
                 rv.setTextViewText(R.id.tvValue2, "*****")
+                rv.setImageViewResource(R.id.ivToggle, R.drawable.ic_visibility_off)
             } else {
                 val bitText = "Bitvavo total: $bitvavo (${formatTime(bitTime)})"
                 val tradingText = "Trading212 total: $trading (${formatTime(tradingTime)})"
                 rv.setTextViewText(R.id.tvValue1, bitText)
                 rv.setTextViewText(R.id.tvValue2, tradingText)
+                rv.setImageViewResource(R.id.ivToggle, R.drawable.ic_visibility)
             }
-            rv.setOnClickPendingIntent(R.id.widget_root, tapPendingIntent(context))
+            rv.setOnClickPendingIntent(R.id.ivToggle, togglePendingIntent(context))
+            rv.setOnClickPendingIntent(R.id.content_layout, updatePendingIntent(context))
             mgr.updateAppWidget(appWidgetId, rv)
         }
     }
