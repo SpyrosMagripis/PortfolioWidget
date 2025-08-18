@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 
 import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
@@ -86,8 +85,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
         enqueuePeriodicWork(context)
-        WorkManager.getInstance(context)
-            .enqueue(OneTimeWorkRequestBuilder<PortfolioWorker>().build())
+        triggerUpdate(context)
     }
 
     override fun onDisabled(context: Context) {
@@ -120,9 +118,6 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
     }
 
     private fun triggerUpdate(context: Context) {
-        WorkManager.getInstance(context)
-            .enqueue(OneTimeWorkRequestBuilder<PortfolioWorker>().build())
-
         Thread {
             // Optional: test public endpoint to verify network
             //testPublicEndpoint(context)
