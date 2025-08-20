@@ -27,6 +27,12 @@
             </intent-filter>
         </activity> */
         -->
+        <!-- Opt in to the updatable graphics driver to avoid
+             GraphicsEnvironment warnings -->
+        <meta-data
+            android:name="com.android.graphics.driver"
+            android:value="all" />
+
         <receiver
             android:name=".PortfolioWidgetProvider"
             android:exported="true">
