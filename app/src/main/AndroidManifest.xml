@@ -27,6 +27,8 @@
             </intent-filter>
         </activity> */
         -->
+        <meta-data android:name="com.google.android.graphics.driver.production.allow" android:value="true" />
+
         <receiver
             android:name=".PortfolioWidgetProvider"
             android:exported="true">
