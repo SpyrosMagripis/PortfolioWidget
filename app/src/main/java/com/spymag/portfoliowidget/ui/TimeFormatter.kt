@@ -1,8 +1,21 @@
 package com.spymag.portfoliowidget.ui
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 object TimeFormatter {
+
+    fun formatDateTime(timestamp: Long): String {
+        if (timestamp == 0L) return "N/A"
+        val date = Date(timestamp)
+        val format = SimpleDateFormat("dd-MM HH:mm", Locale.getDefault()).apply {
+            timeZone = TimeZone.getTimeZone("GMT")
+        }
+        return format.format(date)
+    }
 
     fun formatRelativeTime(timestamp: Long): String {
         if (timestamp == 0L) return "N/A"
