@@ -26,8 +26,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity> */
-        -->
+
         <meta-data android:name="com.google.android.graphics.driver.production.allow" android:value="true" />
+        -->
+
+        <!-- Opt in to the updatable graphics driver to avoid
+     GraphicsEnvironment warnings -->
+        <meta-data
+            android:name="com.android.graphics.driver"
+            android:value="all" />
 
         <receiver
             android:name=".PortfolioWidgetProvider"
