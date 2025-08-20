@@ -8,16 +8,15 @@ import java.util.TimeZone
 class TimeFormatterTest {
 
     @Test
-    fun `formatDateTime should format timestamp correctly`() {
-        // Given a specific timestamp
+    fun `formatDateTime should format timestamp correctly with specific timezone`() {
+        // Given a specific timestamp and timezone
         val timestamp = 1672531200000L // 2023-01-01 00:00:00 GMT
+        val gmtTimeZone = TimeZone.getTimeZone("GMT")
 
-        // When formatting the timestamp
-        val formattedDate = TimeFormatter.formatDateTime(timestamp)
+        // When formatting the timestamp with the specific timezone
+        val formattedDate = TimeFormatter.formatDateTime(timestamp, gmtTimeZone)
 
-        // Then the output should be in the correct format
-        // Note: The expected format depends on the default locale.
-        // For this test, we assume a locale that uses "dd-MM HH:mm".
+        // Then the output should be in the correct format for that timezone
         val expectedDate = "01-01 00:00"
         assertEquals(expectedDate, formattedDate)
     }
