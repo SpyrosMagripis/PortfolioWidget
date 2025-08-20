@@ -139,8 +139,8 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                 rv.setTextViewText(R.id.tvValue2, "Trading212 total: ******")
                 rv.setImageViewResource(R.id.ivToggle, R.drawable.ic_visibility_off)
             } else {
-                val bitText = "Bitvavo total: $bitvavo (${TimeFormatter.formatRelativeTime(bitTime)})"
-                val tradingText = "Trading212 total: $trading (${TimeFormatter.formatRelativeTime(tradingTime)})"
+                val bitText = "Bitvavo total: $bitvavo (${TimeFormatter.formatDateTime(bitTime)})"
+                val tradingText = "Trading212 total: $trading (${TimeFormatter.formatDateTime(tradingTime)})"
                 rv.setTextViewText(R.id.tvValue1, bitText)
                 rv.setTextViewText(R.id.tvValue2, tradingText)
                 rv.setImageViewResource(R.id.ivToggle, R.drawable.ic_visibility)
