@@ -17,6 +17,15 @@ object TimeFormatter {
         return format.format(date)
     }
 
+    fun formatDateTime(timestamp: Long, timeZone: TimeZone = TimeZone.getDefault()): String {
+        if (timestamp == 0L) return "N/A"
+        val date = Date(timestamp)
+        val format = SimpleDateFormat("dd-MM HH:mm", Locale.getDefault()).apply {
+            this.timeZone = timeZone
+        }
+        return format.format(date)
+    }
+
     fun formatRelativeTime(timestamp: Long): String {
         if (timestamp == 0L) return "N/A"
 

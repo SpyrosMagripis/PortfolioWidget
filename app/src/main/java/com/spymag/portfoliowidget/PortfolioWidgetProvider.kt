@@ -91,18 +91,23 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                 refreshWidgetFromPrefs(context)
             }
             AppWidgetManager.ACTION_APPWIDGET_UPDATE, ACTION_UPDATE -> {
-                triggerUpdate(context)
+                val pendingResult = goAsync()
+                triggerUpdate(context, pendingResult)
             }
         }
     }
 
-    private fun triggerUpdate(context: Context) {
+    private fun triggerUpdate(context: Context, pendingResult: PendingResult? = null) {
         scope.launch {
-            val summary = portfolioRepository.getPortfolioSummary()
-            Log.d(TAG, "Fetched Bitvavo total value: ${summary.bitvavoTotal}")
-            Log.d(TAG, "Fetched Trading212 total value: ${summary.trading212Total}")
+            try {
+                val summary = portfolioRepository.getPortfolioSummary()
+                Log.d(TAG, "Fetched Bitvavo total value: ${summary.bitvavoTotal}")
+                Log.d(TAG, "Fetched Trading212 total value: ${summary.trading212Total}")
 
-            updateWidgetTotal(context, summary.bitvavoTotal, summary.trading212Total)
+                updateWidgetTotal(context, summary.bitvavoTotal, summary.trading212Total)
+            } finally {
+                pendingResult?.finish()
+            }
         }
     }
 
