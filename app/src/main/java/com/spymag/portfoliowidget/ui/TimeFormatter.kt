@@ -7,6 +7,15 @@ import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 object TimeFormatter {
+  
+    fun formatDateTime(timestamp: Long, timeZone: TimeZone = TimeZone.getDefault()): String {
+        if (timestamp == 0L) return "N/A"
+        val date = Date(timestamp)
+        val format = SimpleDateFormat("yyyy-dd-MM HH:mm", Locale.getDefault()).apply {
+            this.timeZone = timeZone
+        }
+        return format.format(date)
+    }
 
     fun formatDateTime(timestamp: Long, timeZone: TimeZone = TimeZone.getDefault()): String {
         if (timestamp == 0L) return "N/A"

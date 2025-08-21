@@ -2,6 +2,7 @@ package com.spymag.portfoliowidget.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.Locale
 import java.util.TimeZone
 
 class TimeFormatterTest {
