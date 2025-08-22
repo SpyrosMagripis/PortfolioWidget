@@ -104,6 +104,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
+        Log.d(TAG, "onReceive: ${intent.action}")
         when (intent.action) {
             ACTION_TOGGLE -> {
                 val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
