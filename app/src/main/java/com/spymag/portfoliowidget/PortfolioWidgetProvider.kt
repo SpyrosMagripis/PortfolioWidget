@@ -35,7 +35,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
 
     companion object {
         private const val TAG = "PortfolioWidgetProvider"
-        private const val ACTION_UPDATE = "com.spymag.PORTFOLIO_UPDATE"
+        const val ACTION_UPDATE = "com.spymag.PORTFOLIO_UPDATE"
         private const val ACTION_TOGGLE = "com.spymag.PORTFOLIO_TOGGLE"
         private const val UNIQUE_WORK_NAME = "PortfolioUpdateWork"
         private const val PREFS_NAME = "portfolio_widget_prefs"
@@ -111,7 +111,6 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                 prefs.edit().putBoolean(PREF_HIDE_VALUES, !hidden).apply()
                 refreshWidgetFromPrefs(context)
             }
-            Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT,
             AppWidgetManager.ACTION_APPWIDGET_UPDATE, ACTION_UPDATE -> {
                 triggerUpdate(context)
             }
