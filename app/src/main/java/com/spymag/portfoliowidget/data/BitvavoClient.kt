@@ -48,8 +48,8 @@ class BitvavoClient(private val client: OkHttpClient) {
         var total = 0.0
         for (i in 0 until balances.length()) {
             val obj = balances.getJSONObject(i)
-            val available = obj.optDouble("available", 0.0)
-            val inOrder = obj.optDouble("inOrder", 0.0)
+            val available = obj.optString("available").toDoubleOrNull() ?: 0.0
+            val inOrder = obj.optString("inOrder").toDoubleOrNull() ?: 0.0
             val amount = available + inOrder
             if (amount <= 0) continue
 
