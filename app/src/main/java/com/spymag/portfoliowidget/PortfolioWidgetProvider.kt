@@ -112,9 +112,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                 refreshWidgetFromPrefs(context)
             }
             AppWidgetManager.ACTION_APPWIDGET_UPDATE,
-            ACTION_UPDATE,
-            Intent.ACTION_SCREEN_ON,
-            Intent.ACTION_USER_PRESENT -> {
+            ACTION_UPDATE -> {
                 triggerUpdate(context)
             }
         }
