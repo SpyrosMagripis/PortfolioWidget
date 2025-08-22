@@ -111,6 +111,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                 prefs.edit().putBoolean(PREF_HIDE_VALUES, !hidden).apply()
                 refreshWidgetFromPrefs(context)
             }
+            Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT,
             AppWidgetManager.ACTION_APPWIDGET_UPDATE, ACTION_UPDATE -> {
                 triggerUpdate(context)
             }
