@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -57,6 +58,7 @@ private const val PREF_TRADING212 = "trading212_value"
 private const val PREF_TRADING212_TIME = "trading212_time"
 private const val PREF_BITVAVO = "bitvavo_value"
 private const val PREF_BITVAVO_TIME = "bitvavo_time"
+private const val TAG = "MainActivity"
 
 @Composable
 fun PortfolioScreen() {
@@ -75,6 +77,7 @@ fun PortfolioScreen() {
             holdings = fetched
             val total = fetched.sumOf { it.value }
             bitvavoTotal = "€%.2f".format(total)
+            Log.d(TAG, "Fetched Bitvavo total value: $bitvavoTotal")
             prefs.edit()
                 .putString(PREF_BITVAVO, bitvavoTotal)
                 .putLong(PREF_BITVAVO_TIME, System.currentTimeMillis())
@@ -85,6 +88,7 @@ fun PortfolioScreen() {
         try {
             val trading = withContext(Dispatchers.IO) { fetchTrading212TotalValue() }
             tradingTotal = trading
+            Log.d(TAG, "Fetched Trading212 total value: $trading")
             prefs.edit()
                 .putString(PREF_TRADING212, trading)
                 .putLong(PREF_TRADING212_TIME, System.currentTimeMillis())
