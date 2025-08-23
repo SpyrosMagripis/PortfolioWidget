@@ -217,7 +217,7 @@ fun Treemap(data: List<Holding>, modifier: Modifier = Modifier) {
             textSize = 28f
         }
     }
-    Canvas(modifier) {
+    Canvas(modifier.padding(4.dp)) {
         fun drawRects(items: List<Holding>, x: Float, y: Float, w: Float, h: Float, horizontal: Boolean, index: Int) {
             if (items.isEmpty()) return
             if (items.size == 1) {
