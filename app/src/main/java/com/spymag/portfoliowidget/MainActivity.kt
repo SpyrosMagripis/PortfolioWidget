@@ -47,7 +47,9 @@ fun PortfolioScreen() {
     var holdings by remember { mutableStateOf<List<Holding>?>(null) }
 
     LaunchedEffect(Unit) {
-        holdings = fetchBitvavoHoldings().filter { it.value > 1.0 }
+        holdings = fetchBitvavoHoldings()
+            .filter { it.value > 1.0 }
+            .sortedByDescending { it.value }
     }
 
     Scaffold(
@@ -78,26 +80,44 @@ fun PortfolioScreen() {
             Column(
                 modifier = Modifier
                     .padding(inner)
-                    .fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .fillMaxSize()
             ) {
-                PieChart(data, modifier = Modifier
-                    .size(200.dp)
-                    .padding(top = 16.dp))
-                Spacer(Modifier.height(16.dp))
-                data.forEachIndexed { index, h ->
-                    val color = chartColors[index % chartColors.size]
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(16.dp)
-                                .background(color)
-                        )
-                        Text(
-                            text = "${h.symbol}: €${"%.2f".format(h.value)}",
-                            modifier = Modifier.padding(start = 8.dp)
-                        )
+                Column(
+                    modifier = Modifier
+                        .weight(0.75f)
+                        .fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    PieChart(
+                        data,
+                        modifier = Modifier
+                            .size(200.dp)
+                            .padding(top = 16.dp)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    data.forEachIndexed { index, h ->
+                        val color = chartColors[index % chartColors.size]
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier
+                                    .size(16.dp)
+                                    .background(color)
+                            )
+                            Text(
+                                text = "${h.symbol}: €${"%.2f".format(h.value)}",
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
                     }
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(0.25f)
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Trading 212: €0.00")
                 }
             }
         }
