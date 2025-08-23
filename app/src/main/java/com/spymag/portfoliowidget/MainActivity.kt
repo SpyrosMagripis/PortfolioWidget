@@ -12,8 +12,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -28,20 +26,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import android.graphics.Paint
 import com.spymag.portfoliowidget.ui.theme.PortfolioWidgetTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONArray
-import org.json.JSONObject
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,7 +61,7 @@ private const val TAG = "MainActivity"
 fun PortfolioScreen() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
-    var holdings by remember { mutableStateOf<List<Holding>?>(null) }
+    var bitvavoHoldings by remember { mutableStateOf<List<Holding>?>(null) }
     var tradingHoldings by remember { mutableStateOf<List<Holding>?>(null) }
     var bitvavoTotal by remember { mutableStateOf(prefs.getString(PREF_BITVAVO, null)) }
     var tradingTotal by remember { mutableStateOf(prefs.getString(PREF_TRADING212, null)) }
@@ -79,7 +72,7 @@ fun PortfolioScreen() {
             val fetched = fetchBitvavoHoldings()
                 .filter { it.value > 1.0 }
                 .sortedByDescending { it.value }
-            holdings = fetched
+            bitvavoHoldings = fetched
             val total = fetched.sumOf { it.value }
             bitvavoTotal = "€%.2f".format(total)
             Log.d(TAG, "Fetched Bitvavo total value: $bitvavoTotal")
@@ -142,7 +135,7 @@ fun PortfolioScreen() {
             }
         }
     ) { inner ->
-        val data = holdings
+        val data = bitvavoHoldings
         if (data == null) {
             Box(
                 modifier = Modifier
@@ -158,41 +151,27 @@ fun PortfolioScreen() {
                     .padding(inner)
                     .fillMaxSize()
             ) {
-                Column(
+                Box(
                     modifier = Modifier
-                        .weight(0.75f)
-                        .fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .weight(0.5f)
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    PieChart(
-                        data,
-                        modifier = Modifier
-                            .size(200.dp)
-                            .padding(top = 16.dp)
+                    Treemap(
+                        data = data,
+                        modifier = Modifier.matchParentSize()
                     )
-                    Spacer(Modifier.height(16.dp))
+                    val text = bitvavoTotal ?: "…"
                     Text(
-                        text = "Bitvavo total: ${bitvavoTotal ?: "\u2026"}"
+                        text = "Bitvavo: $text",
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(8.dp)
                     )
-                    Spacer(Modifier.height(8.dp))
-                    data.forEachIndexed { index, h ->
-                        val color = chartColors[index % chartColors.size]
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier
-                                    .size(16.dp)
-                                    .background(color)
-                            )
-                            Text(
-                                text = "${h.symbol}: €${"%.2f".format(h.value)}",
-                                modifier = Modifier.padding(start = 8.dp)
-                            )
-                        }
-                    }
                 }
                 Box(
                     modifier = Modifier
-                        .weight(0.25f)
+                        .weight(0.5f)
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
@@ -231,24 +210,6 @@ private val chartColors = listOf(
 )
 
 @Composable
-fun PieChart(data: List<Holding>, modifier: Modifier = Modifier) {
-    val total = data.sumOf { it.value }
-    Canvas(modifier) {
-        var startAngle = -90f
-        data.forEachIndexed { index, h ->
-            val sweep = (h.value / total * 360f).toFloat()
-            drawArc(
-                color = chartColors[index % chartColors.size],
-                startAngle = startAngle,
-                sweepAngle = sweep,
-                useCenter = true
-            )
-            startAngle += sweep
-        }
-    }
-}
-
-@Composable
 fun Treemap(data: List<Holding>, modifier: Modifier = Modifier) {
     val paint = remember {
         Paint().apply {
@@ -262,7 +223,8 @@ fun Treemap(data: List<Holding>, modifier: Modifier = Modifier) {
             if (items.size == 1) {
                 val color = chartColors[index % chartColors.size]
                 drawRect(color, Offset(x, y), Size(w, h))
-                drawContext.canvas.nativeCanvas.drawText(items[0].symbol, x + 8f, y + 32f, paint)
+                val label = "${items[0].symbol} €${"%.2f".format(items[0].value)}"
+                drawContext.canvas.nativeCanvas.drawText(label, x + 8f, y + 32f, paint)
                 return
             }
             val total = items.sumOf { it.value }
@@ -272,13 +234,15 @@ fun Treemap(data: List<Holding>, modifier: Modifier = Modifier) {
                 val w1 = w * fraction
                 val color = chartColors[index % chartColors.size]
                 drawRect(color, Offset(x, y), Size(w1, h))
-                drawContext.canvas.nativeCanvas.drawText(first.symbol, x + 8f, y + 32f, paint)
+                val label = "${first.symbol} €${"%.2f".format(first.value)}"
+                drawContext.canvas.nativeCanvas.drawText(label, x + 8f, y + 32f, paint)
                 drawRects(items.drop(1), x + w1, y, w - w1, h, !horizontal, index + 1)
             } else {
                 val h1 = h * fraction
                 val color = chartColors[index % chartColors.size]
                 drawRect(color, Offset(x, y), Size(w, h1))
-                drawContext.canvas.nativeCanvas.drawText(first.symbol, x + 8f, y + 32f, paint)
+                val label = "${first.symbol} €${"%.2f".format(first.value)}"
+                drawContext.canvas.nativeCanvas.drawText(label, x + 8f, y + 32f, paint)
                 drawRects(items.drop(1), x, y + h1, w, h - h1, !horizontal, index + 1)
             }
         }
@@ -286,63 +250,3 @@ fun Treemap(data: List<Holding>, modifier: Modifier = Modifier) {
     }
 }
 
-suspend fun fetchBitvavoHoldings(): List<Holding> = withContext(Dispatchers.IO) {
-    val apiKey = BuildConfig.BITVAVO_API_KEY
-    val apiSecret = BuildConfig.BITVAVO_API_SECRET
-    val timestamp = System.currentTimeMillis().toString()
-    val method = "GET"
-    val requestPath = "/v2/balance"
-    val signature = sign(apiSecret, timestamp, method, requestPath)
-    val req = Request.Builder()
-        .url("https://api.bitvavo.com$requestPath")
-        .addHeader("Bitvavo-Access-Key", apiKey)
-        .addHeader("Bitvavo-Access-Timestamp", timestamp)
-        .addHeader("Bitvavo-Access-Signature", signature)
-        .addHeader("Bitvavo-Access-Window", "60000")
-        .get()
-        .build()
-    val client = OkHttpClient()
-    val balancesJson = client.newCall(req).execute().use { it.body?.string().orEmpty() }
-    val balances = JSONArray(balancesJson)
-    val holdings = mutableListOf<Holding>()
-    for (i in 0 until balances.length()) {
-        val obj = balances.getJSONObject(i)
-        val amount = obj.optDouble("available", 0.0) + obj.optDouble("inOrder", 0.0)
-        if (amount <= 0) continue
-        val symbol = obj.getString("symbol")
-        val value = if (symbol.equals("EUR", true)) {
-            amount
-        } else {
-            val market = "$symbol-EUR"
-            val priceReq = Request.Builder()
-                .url("https://api.bitvavo.com/v2/ticker/price?market=$market")
-                .get()
-                .build()
-            val priceJson = client.newCall(priceReq).execute().use { it.body?.string().orEmpty() }
-            val priceObj = JSONObject(priceJson)
-            val price = priceObj.optDouble("price", 0.0)
-            amount * price
-        }
-        holdings += Holding(symbol, value)
-    }
-    holdings
-}
-
-private fun sign(secret: String, timestamp: String, method: String, path: String): String {
-    val message = timestamp + method + path
-    val mac = Mac.getInstance("HmacSHA256")
-    mac.init(SecretKeySpec(secret.toByteArray(), "HmacSHA256"))
-    val hash = mac.doFinal(message.toByteArray())
-    return hash.joinToString("") { "%02x".format(it) }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun PreviewPortfolio() {
-    PortfolioWidgetTheme {
-        PieChart(
-            data = listOf(Holding("BTC", 50.0), Holding("ETH", 30.0), Holding("EUR", 20.0)),
-            modifier = Modifier.size(200.dp)
-        )
-    }
-}
