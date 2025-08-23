@@ -1,5 +1,9 @@
 package com.spymag.portfoliowidget
 
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -7,19 +11,25 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.spymag.portfoliowidget.ui.theme.PortfolioWidgetTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -42,21 +52,42 @@ class MainActivity : ComponentActivity() {
 
 data class Holding(val symbol: String, val value: Double)
 
+private const val PREFS_NAME = "portfolio_widget_prefs"
+private const val PREF_TRADING212 = "trading212_value"
+private const val PREF_TRADING212_TIME = "trading212_time"
+
 @Composable
 fun PortfolioScreen() {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
     var holdings by remember { mutableStateOf<List<Holding>?>(null) }
-    var tradingTotal by remember { mutableStateOf<String?>(null) }
+    var tradingTotal by remember { mutableStateOf(prefs.getString(PREF_TRADING212, null)) }
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
+    suspend fun refresh() {
         holdings = fetchBitvavoHoldings()
             .filter { it.value > 1.0 }
             .sortedByDescending { it.value }
-        tradingTotal = try {
-            withContext(Dispatchers.IO) { fetchTrading212TotalValue() }
+        try {
+            val trading = withContext(Dispatchers.IO) { fetchTrading212TotalValue() }
+            tradingTotal = trading
+            prefs.edit()
+                .putString(PREF_TRADING212, trading)
+                .putLong(PREF_TRADING212_TIME, System.currentTimeMillis())
+                .apply()
+            val ids = AppWidgetManager.getInstance(context)
+                .getAppWidgetIds(ComponentName(context, PortfolioWidgetProvider::class.java))
+            val intent = Intent(context, PortfolioWidgetProvider::class.java).apply {
+                action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
+            }
+            context.sendBroadcast(intent)
         } catch (e: Exception) {
-            "–"
+            if (tradingTotal == null) tradingTotal = "–"
         }
     }
+
+    LaunchedEffect(Unit) { refresh() }
 
     Scaffold(
         topBar = {
@@ -64,11 +95,25 @@ fun PortfolioScreen() {
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "Portfolio Widget",
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.padding(16.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Portfolio Widget",
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { scope.launch { refresh() } }) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = "Refresh",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
             }
         }
     ) { inner ->
