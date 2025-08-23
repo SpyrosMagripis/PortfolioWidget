@@ -44,10 +44,10 @@ data class Holding(val symbol: String, val value: Double)
 
 @Composable
 fun PortfolioScreen() {
-    var holdings by remember { mutableStateOf<List<Holding>>(emptyList()) }
+    var holdings by remember { mutableStateOf<List<Holding>?>(null) }
 
     LaunchedEffect(Unit) {
-        holdings = fetchBitvavoHoldings()
+        holdings = fetchBitvavoHoldings().filter { it.value > 1.0 }
     }
 
     Scaffold(
@@ -64,7 +64,8 @@ fun PortfolioScreen() {
             }
         }
     ) { inner ->
-        if (holdings.isEmpty()) {
+        val data = holdings
+        if (data == null) {
             Box(
                 modifier = Modifier
                     .padding(inner)
@@ -80,11 +81,11 @@ fun PortfolioScreen() {
                     .fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                PieChart(holdings, modifier = Modifier
+                PieChart(data, modifier = Modifier
                     .size(200.dp)
                     .padding(top = 16.dp))
                 Spacer(Modifier.height(16.dp))
-                holdings.forEachIndexed { index, h ->
+                data.forEachIndexed { index, h ->
                     val color = chartColors[index % chartColors.size]
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
