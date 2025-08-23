@@ -45,11 +45,17 @@ data class Holding(val symbol: String, val value: Double)
 @Composable
 fun PortfolioScreen() {
     var holdings by remember { mutableStateOf<List<Holding>?>(null) }
+    var tradingTotal by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         holdings = fetchBitvavoHoldings()
             .filter { it.value > 1.0 }
             .sortedByDescending { it.value }
+        tradingTotal = try {
+            withContext(Dispatchers.IO) { fetchTrading212TotalValue() }
+        } catch (e: Exception) {
+            "–"
+        }
     }
 
     Scaffold(
@@ -117,7 +123,8 @@ fun PortfolioScreen() {
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("Trading 212: €0.00")
+                    val text = tradingTotal ?: "…"
+                    Text("Trading 212: $text")
                 }
             }
         }
