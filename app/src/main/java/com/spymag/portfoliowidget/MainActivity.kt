@@ -55,19 +55,33 @@ data class Holding(val symbol: String, val value: Double)
 private const val PREFS_NAME = "portfolio_widget_prefs"
 private const val PREF_TRADING212 = "trading212_value"
 private const val PREF_TRADING212_TIME = "trading212_time"
+private const val PREF_BITVAVO = "bitvavo_value"
+private const val PREF_BITVAVO_TIME = "bitvavo_time"
 
 @Composable
 fun PortfolioScreen() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
     var holdings by remember { mutableStateOf<List<Holding>?>(null) }
+    var bitvavoTotal by remember { mutableStateOf(prefs.getString(PREF_BITVAVO, null)) }
     var tradingTotal by remember { mutableStateOf(prefs.getString(PREF_TRADING212, null)) }
     val scope = rememberCoroutineScope()
 
     suspend fun refresh() {
-        holdings = fetchBitvavoHoldings()
-            .filter { it.value > 1.0 }
-            .sortedByDescending { it.value }
+        try {
+            val fetched = fetchBitvavoHoldings()
+                .filter { it.value > 1.0 }
+                .sortedByDescending { it.value }
+            holdings = fetched
+            val total = fetched.sumOf { it.value }
+            bitvavoTotal = "€%.2f".format(total)
+            prefs.edit()
+                .putString(PREF_BITVAVO, bitvavoTotal)
+                .putLong(PREF_BITVAVO_TIME, System.currentTimeMillis())
+                .apply()
+        } catch (e: Exception) {
+            if (bitvavoTotal == null) bitvavoTotal = "–"
+        }
         try {
             val trading = withContext(Dispatchers.IO) { fetchTrading212TotalValue() }
             tradingTotal = trading
@@ -75,16 +89,16 @@ fun PortfolioScreen() {
                 .putString(PREF_TRADING212, trading)
                 .putLong(PREF_TRADING212_TIME, System.currentTimeMillis())
                 .apply()
-            val ids = AppWidgetManager.getInstance(context)
-                .getAppWidgetIds(ComponentName(context, PortfolioWidgetProvider::class.java))
-            val intent = Intent(context, PortfolioWidgetProvider::class.java).apply {
-                action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
-                putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
-            }
-            context.sendBroadcast(intent)
         } catch (e: Exception) {
             if (tradingTotal == null) tradingTotal = "–"
         }
+        val ids = AppWidgetManager.getInstance(context)
+            .getAppWidgetIds(ComponentName(context, PortfolioWidgetProvider::class.java))
+        val intent = Intent(context, PortfolioWidgetProvider::class.java).apply {
+            action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
+        }
+        context.sendBroadcast(intent)
     }
 
     LaunchedEffect(Unit) { refresh() }
@@ -146,6 +160,10 @@ fun PortfolioScreen() {
                             .padding(top = 16.dp)
                     )
                     Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "Bitvavo total: ${bitvavoTotal ?: "\u2026"}"
+                    )
+                    Spacer(Modifier.height(8.dp))
                     data.forEachIndexed { index, h ->
                         val color = chartColors[index % chartColors.size]
                         Row(verticalAlignment = Alignment.CenterVertically) {
