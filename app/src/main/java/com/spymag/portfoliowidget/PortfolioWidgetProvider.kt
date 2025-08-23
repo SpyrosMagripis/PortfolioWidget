@@ -60,6 +60,16 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         }
+
+        fun openAppPendingIntent(context: Context): PendingIntent {
+            val intent = Intent(context, MainActivity::class.java)
+            return PendingIntent.getActivity(
+                context,
+                3,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
     }
 
     override fun onUpdate(
@@ -155,6 +165,7 @@ class PortfolioWidgetProvider : AppWidgetProvider() {
             }
             rv.setOnClickPendingIntent(R.id.ivToggle, togglePendingIntent(context))
             rv.setOnClickPendingIntent(R.id.content_layout, updatePendingIntent(context))
+            rv.setOnClickPendingIntent(R.id.ivOpenApp, openAppPendingIntent(context))
             mgr.updateAppWidget(appWidgetId, rv)
         }
     }

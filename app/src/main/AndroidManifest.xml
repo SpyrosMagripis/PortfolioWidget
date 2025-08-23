@@ -14,7 +14,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.PortfolioWidget">
-        <!--
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -22,11 +21,9 @@
             android:theme="@style/Theme.PortfolioWidget">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity> */
-        -->
+        </activity>
         <!-- Opt in to the updatable graphics driver to avoid
              GraphicsEnvironment warnings -->
         <meta-data
