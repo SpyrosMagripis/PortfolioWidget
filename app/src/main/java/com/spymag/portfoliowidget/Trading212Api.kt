@@ -48,3 +48,41 @@ fun fetchTrading212TotalValue(): String {
     return "€%.2f".format(total)
 }
 
+fun fetchTrading212Holdings(): List<Holding> {
+    val apiKey = BuildConfig.TRADING212_API_KEY
+    val baseUrl = "https://live.trading212.com"
+    val client = OkHttpClient()
+
+    // Verify authentication
+    val infoReq = Request.Builder()
+        .url("$baseUrl/api/v0/equity/account/info")
+        .addHeader("Authorization", apiKey)
+        .get()
+        .build()
+    client.newCall(infoReq).execute().use { resp ->
+        if (!resp.isSuccessful) {
+            throw Exception("Trading212 auth failed: ${resp.code}")
+        }
+    }
+
+    // Fetch portfolio positions
+    val portReq = Request.Builder()
+        .url("$baseUrl/api/v0/equity/portfolio")
+        .addHeader("Authorization", apiKey)
+        .get()
+        .build()
+    val portJson = client.newCall(portReq).execute().use { it.body?.string().orEmpty() }
+    Log.d(TAG, "Trading212 portfolio response: $portJson")
+    val positions = JSONArray(portJson)
+
+    val holdings = mutableListOf<Holding>()
+    for (i in 0 until positions.length()) {
+        val p = positions.getJSONObject(i)
+        val ticker = p.optString("ticker")
+        val quantity = p.optDouble("quantity", 0.0)
+        val currentPrice = p.optDouble("currentPrice", 0.0)
+        holdings += Holding(ticker, quantity * currentPrice)
+    }
+    return holdings
+}
+

@@ -1,6 +1,6 @@
 # PortfolioWidget
 
-An Android home screen widget that displays combined portfolio values from Bitvavo and Trading212 accounts.
+An Android home screen widget that displays combined portfolio values from Bitvavo and Trading212 accounts. The app view now includes treemaps of current Bitvavo and Trading212 holdings with each position labeled in euros.
 
 ## Setup
 
