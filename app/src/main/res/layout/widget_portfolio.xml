@@ -42,4 +42,13 @@
             android:textSize="14sp"/>
     </LinearLayout>
 
+    <ImageView
+        android:id="@+id/ivOpenApp"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:padding="10dp"
+        android:src="@drawable/ic_open_in_app"
+        android:contentDescription="@string/open_app"
+        android:layout_gravity="center_vertical"/>
+
 </LinearLayout>
