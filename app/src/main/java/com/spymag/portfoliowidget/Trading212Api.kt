@@ -51,7 +51,7 @@ private fun fetchTrading212Portfolio(): Trading212Portfolio {
     val accountSnapshot = fetchAccountSnapshot(client, baseUrl, apiKey)
     val accountCurrency = accountSnapshot.accountCurrency
     val positions = fetchPortfolioPositions(client, baseUrl, apiKey)
-    val fxProvider = FxRateProvider(client, accountCurrency)
+    val fxProvider = FxRateProvider(client, baseUrl, apiKey, accountCurrency)
 
     val holdings = mutableListOf<Holding>()
     for (i in 0 until positions.length()) {
@@ -156,7 +156,7 @@ private fun fetchCashBalance(
             }
 
             val json = JSONObject(body)
-            val cash = extractCashBalance(json)
+            val cash = parseCashEndpointBalance(json)
             if (cash != null) {
                 val formattedCash = String.format(Locale.US, "%.2f", cash)
                 Log.i(TAG, "Trading212 cash endpoint balance: $formattedCash ${accountCurrency.uppercase(Locale.US)}")
@@ -172,6 +172,34 @@ private fun fetchCashBalance(
         Log.w(TAG, "Unable to parse Trading212 cash endpoint response", e)
         null
     }
+}
+
+private fun parseCashEndpointBalance(json: JSONObject): Double? {
+    json.optStringOrNull("result")?.let { resultRaw ->
+        val normalized = resultRaw.uppercase(Locale.US)
+        if (normalized != "SUCCESS" && normalized != "OK") {
+            Log.w(TAG, "Trading212 cash endpoint reported result=$normalized")
+        }
+    }
+
+    val preferredKeys = listOf("total", "free")
+    for (key in preferredKeys) {
+        json.optParsedDouble(key)?.let { return it }
+    }
+
+    json.optJSONObject("cash")?.let { cashObject ->
+        for (key in preferredKeys) {
+            cashObject.optParsedDouble(key)?.let { return it }
+        }
+    }
+
+    val fallbackKeys = listOf("balance", "available", "amount", "value", "cash")
+    for (key in fallbackKeys) {
+        json.optParsedDouble(key)?.let { return it }
+        json.optJSONObject(key)?.optParsedDouble("total", "free")?.let { return it }
+    }
+
+    return null
 }
 
 private fun extractAccountCurrency(info: JSONObject): String? {
@@ -358,6 +386,8 @@ private fun formatAccountValue(amount: Double, currencyCode: String): String {
 
 private class FxRateProvider(
     private val client: OkHttpClient,
+    private val baseUrl: String,
+    private val apiKey: String,
     accountCurrency: String
 ) {
     private val targetCurrency = accountCurrency.uppercase(Locale.US)
@@ -390,6 +420,7 @@ private class FxRateProvider(
 
     private fun fetchUsdRate(): Double {
         val fetchers = listOf(
+            "Trading212" to ::fetchFromTrading212,
             "ER-API" to ::fetchFromOpenErApi,
             "Frankfurter" to ::fetchFromFrankfurter
         )
@@ -406,6 +437,49 @@ private class FxRateProvider(
         }
 
         throw IOException("Unable to fetch FX rate from USD to $targetCurrency")
+    }
+
+    private fun fetchFromTrading212(): Double? {
+        val url = "$baseUrl/api/v0/equity/fx/rate?from=USD&to=$targetCurrency"
+        Log.i(TAG, "Requesting FX rate USD->$targetCurrency from Trading212")
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", apiKey)
+            .get()
+            .build()
+
+        return try {
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.w(TAG, "FX rate retrieval failed: Trading212 responded ${resp.code}")
+                    return null
+                }
+
+                val body = resp.body?.string().orEmpty()
+                if (body.isBlank()) {
+                    Log.w(TAG, "FX rate retrieval failed: Trading212 returned empty body")
+                    return null
+                }
+
+                val parsedRate = parseTrading212Rate(body, targetCurrency)
+                if (parsedRate != null) {
+                    Log.i(TAG, "Trading212 rate for USD->$targetCurrency: $parsedRate")
+                    parsedRate
+                } else {
+                    Log.w(
+                        TAG,
+                        "FX rate retrieval failed: unable to parse Trading212 FX response for USD->$targetCurrency"
+                    )
+                    null
+                }
+            }
+        } catch (e: IOException) {
+            Log.w(TAG, "FX rate retrieval failed: Trading212 request error", e)
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "FX rate retrieval failed: unable to parse Trading212 response", e)
+            null
+        }
     }
 
     private fun fetchFromOpenErApi(): Double? {
@@ -513,6 +587,96 @@ private class FxRateProvider(
         }
     }
 }
+
+private fun parseTrading212Rate(body: String, targetCurrency: String): Double? {
+    val trimmed = body.trim()
+    if (trimmed.isEmpty()) {
+        return null
+    }
+
+    val normalizedTarget = targetCurrency.uppercase(Locale.US)
+
+    fun JSONObject.extractRate(): Double? {
+        val primaryKeys = listOf(
+            "rate",
+            "fxRate",
+            "mid",
+            "midPrice",
+            "price",
+            "value",
+            normalizedTarget.lowercase(Locale.US),
+            normalizedTarget
+        )
+        for (key in primaryKeys) {
+            optParsedDouble(key)?.let { return it }
+        }
+
+        optJSONObject("rates")?.let { rates ->
+            val directKeys = listOf(
+                normalizedTarget,
+                "USD$normalizedTarget",
+                "USD/$normalizedTarget",
+                "USD-$normalizedTarget",
+                "USD_TO_$normalizedTarget"
+            )
+            for (key in directKeys) {
+                parseDouble(rates.opt(key))?.let { return it }
+            }
+
+            val keys = rates.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                if (key.contains("USD", ignoreCase = true) && key.contains(normalizedTarget, ignoreCase = true)) {
+                    parseDouble(rates.opt(key))?.let { return it }
+                }
+            }
+        }
+
+        optJSONArray("rates")?.let { array ->
+            for (i in 0 until array.length()) {
+                val item = array.opt(i)
+                if (item is JSONObject) {
+                    item.extractRate()?.let { return it }
+                } else {
+                    parseDouble(item)?.let { return it }
+                }
+            }
+        }
+
+        val keys = keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (key.contains("rate", ignoreCase = true) || key.contains("price", ignoreCase = true)) {
+                parseDouble(opt(key))?.let { return it }
+            }
+        }
+
+        return null
+    }
+
+    return try {
+        when {
+            trimmed.startsWith("{") -> JSONObject(trimmed).extractRate()
+            trimmed.startsWith("[") -> {
+                val array = JSONArray(trimmed)
+                for (i in 0 until array.length()) {
+                    val item = array.opt(i)
+                    if (item is JSONObject) {
+                        item.extractRate()?.let { return it }
+                    } else {
+                        parseDouble(item)?.let { return it }
+                    }
+                }
+                null
+            }
+            else -> trimmed.toDoubleOrNull()
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "Unable to parse Trading212 FX payload", e)
+        null
+    }
+}
+
 private fun JSONObject.optStringOrNull(key: String): String? {
     val value = optString(key, "")
     return value.takeIf { it.isNotBlank() }
