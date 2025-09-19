@@ -33,13 +33,13 @@ private fun fetchTrading212Portfolio(): Trading212Portfolio {
 
     val accountCurrency = fetchAccountCurrency(client, baseUrl, apiKey)
     val positions = fetchPortfolioPositions(client, baseUrl, apiKey)
-    val fxProvider = FxRateProvider(client, baseUrl, apiKey, accountCurrency)
+    val fxProvider = FxRateProvider(client, accountCurrency)
 
     val holdings = mutableListOf<Holding>()
     for (i in 0 until positions.length()) {
         val position = positions.getJSONObject(i)
         val ticker = extractTicker(position)
-        val value = computePositionValueInAccountCurrency(position, accountCurrency, fxProvider)
+        val value = computePositionValueInAccountCurrency(position, accountCurrency, fxProvider, ticker)
         holdings += Holding(ticker, value)
     }
 
@@ -119,7 +119,8 @@ private fun extractTicker(position: JSONObject): String {
 private fun computePositionValueInAccountCurrency(
     position: JSONObject,
     accountCurrency: String,
-    fxProvider: FxRateProvider
+    fxProvider: FxRateProvider,
+    ticker: String
 ): Double {
     position.optParsedDouble("valueInAccountCurrency", "currentValueInAccountCurrency")?.let { return it }
 
@@ -148,7 +149,7 @@ private fun computePositionValueInAccountCurrency(
         return instrumentValue
     }
 
-    return fxProvider.convert(instrumentValue, instrumentCurrency)
+    return fxProvider.convert(instrumentValue, instrumentCurrency, ticker)
 }
 
 private fun formatAccountValue(amount: Double, currencyCode: String): String {
@@ -164,14 +165,12 @@ private fun formatAccountValue(amount: Double, currencyCode: String): String {
 
 private class FxRateProvider(
     private val client: OkHttpClient,
-    private val tradingBaseUrl: String,
-    private val apiKey: String,
     accountCurrency: String
 ) {
     private val targetCurrency = accountCurrency.uppercase(Locale.US)
     private val cache = mutableMapOf<String, Double>()
 
-    fun convert(amount: Double, fromCurrency: String): Double {
+    fun convert(amount: Double, fromCurrency: String, ticker: String): Double {
         if (amount == 0.0) {
             return 0.0
         }
@@ -180,97 +179,35 @@ private class FxRateProvider(
             return amount
         }
 
-        val rate = cache[source] ?: fetchRate(source).also { cache[source] = it }
-        return amount * rate
+        val rate = cache[source]?.also {
+            Log.i(TAG, "Using cached FX rate $source->$targetCurrency = $it")
+        } ?: fetchRate(source).also { fetchedRate ->
+            cache[source] = fetchedRate
+        }
+
+        val converted = amount * rate
+        if (source == "USD" && targetCurrency == "EUR") {
+            val formattedAmount = String.format(Locale.US, "%.2f", amount)
+            val formattedConverted = String.format(Locale.US, "%.2f", converted)
+            val formattedRate = String.format(Locale.US, "%.6f", rate)
+            Log.i(
+                TAG,
+                "Converted $ticker: $formattedAmount USD -> $formattedConverted EUR at rate $formattedRate"
+            )
+        }
+        return converted
     }
 
     private fun fetchRate(fromCurrency: String): Double {
-        fetchFromTrading212(fromCurrency)?.let { return it }
-        fetchFromExchangeRateHost(fromCurrency)?.let { return it }
-        throw IOException("Unable to fetch FX rate from $fromCurrency to $targetCurrency")
-    }
-
-    private fun fetchFromTrading212(fromCurrency: String): Double? {
-        val directSymbols = listOf(
-            "$fromCurrency$targetCurrency",
-            "${fromCurrency}_$targetCurrency",
-            "$fromCurrency/$targetCurrency"
-        )
-        for (symbol in directSymbols) {
-            val price = fetchTrading212Price(symbol)
-            if (price != null && price > 0) {
-                return price
-            }
-        }
-
-        val inverseSymbols = listOf(
-            "$targetCurrency$fromCurrency",
-            "${targetCurrency}_$fromCurrency",
-            "$targetCurrency/$fromCurrency"
-        )
-        for (symbol in inverseSymbols) {
-            val price = fetchTrading212Price(symbol)
-            if (price != null && price > 0) {
-                return 1 / price
-            }
-        }
-
-        return null
-    }
-
-    private fun fetchTrading212Price(symbol: String): Double? {
-        val url = "$tradingBaseUrl/api/v0/equity/prices/$symbol"
-        val request = Request.Builder()
-            .url(url)
-            .addHeader("Authorization", apiKey)
-            .get()
-            .build()
-
-        return try {
-            client.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    Log.w(TAG, "Trading212 FX request for $symbol failed: ${resp.code}")
-                    return null
-                }
-
-                val body = resp.body?.string().orEmpty()
-                if (body.isBlank()) {
-                    return null
-                }
-
-                parsePrice(body)
-            }
-        } catch (e: IOException) {
-            Log.w(TAG, "Trading212 FX request for $symbol failed", e)
-            null
-        }
-    }
-
-    private fun parsePrice(body: String): Double? {
-        try {
-            val array = JSONArray(body)
-            for (i in 0 until array.length()) {
-                val obj = array.optJSONObject(i)
-                if (obj != null) {
-                    parseDouble(obj)?.let { return it }
-                } else {
-                    parseDouble(array.opt(i))?.let { return it }
-                }
-            }
-        } catch (ignored: Exception) {
-            // Continue to try parsing as an object
-        }
-
-        return try {
-            val obj = JSONObject(body)
-            parseDouble(obj)
-        } catch (ignored: Exception) {
-            body.toDoubleOrNull()
-        }
+        val rate = fetchFromExchangeRateHost(fromCurrency)
+            ?: throw IOException("Unable to fetch FX rate from $fromCurrency to $targetCurrency")
+        Log.i(TAG, "FX rate retrieval successful: $fromCurrency->$targetCurrency = $rate")
+        return rate
     }
 
     private fun fetchFromExchangeRateHost(fromCurrency: String): Double? {
         val url = "https://api.exchangerate.host/convert?from=$fromCurrency&to=$targetCurrency"
+        Log.i(TAG, "Requesting FX rate $fromCurrency->$targetCurrency from ExchangeRateHost")
         val request = Request.Builder()
             .url(url)
             .get()
@@ -279,28 +216,39 @@ private class FxRateProvider(
         return try {
             client.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    Log.w(TAG, "ExchangeRateHost request failed: ${resp.code}")
+                    Log.w(TAG, "FX rate retrieval failed: ExchangeRateHost responded ${resp.code}")
                     return null
                 }
 
                 val body = resp.body?.string().orEmpty()
                 if (body.isBlank()) {
+                    Log.w(TAG, "FX rate retrieval failed: ExchangeRateHost returned empty body")
                     return null
                 }
 
                 val json = JSONObject(body)
                 val result = json.optDouble("result", Double.NaN)
                 if (!result.isNaN() && result > 0) {
+                    Log.i(TAG, "ExchangeRateHost result for $fromCurrency->$targetCurrency: $result")
                     return result
                 }
 
-                json.optJSONObject("info")?.optDouble("rate")?.takeIf { !it.isNaN() && it > 0 }
+                val infoRate = json.optJSONObject("info")?.optDouble("rate")?.takeIf { !it.isNaN() && it > 0 }
+                if (infoRate != null) {
+                    Log.i(TAG, "ExchangeRateHost info rate for $fromCurrency->$targetCurrency: $infoRate")
+                } else {
+                    Log.w(
+                        TAG,
+                        "FX rate retrieval failed: ExchangeRateHost response missing rate for $fromCurrency->$targetCurrency"
+                    )
+                }
+                infoRate
             }
         } catch (e: IOException) {
-            Log.w(TAG, "ExchangeRateHost request failed", e)
+            Log.w(TAG, "FX rate retrieval failed: ExchangeRateHost request error", e)
             null
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse ExchangeRateHost response", e)
+            Log.w(TAG, "FX rate retrieval failed: unable to parse ExchangeRateHost response", e)
             null
         }
     }
