@@ -10,6 +10,18 @@ import java.util.Currency
 import java.util.Locale
 
 private const val TAG = "Trading212Api"
+private val CASH_KEYWORDS = listOf(
+    "CASH",
+    "FREEFUNDS",
+    "AVAILABLEFUNDS",
+    "AVAILABLECASH",
+    "FREECASH",
+    "TOTALCASH",
+    "CASHBALANCE",
+    "CASHVALUE",
+    "LIQUIDFUNDS",
+    "UNINVESTED"
+)
 
 fun fetchTrading212TotalValue(): String {
     val portfolio = fetchTrading212Portfolio()
@@ -26,12 +38,18 @@ private data class Trading212Portfolio(
     val holdings: List<Holding>
 )
 
+private data class AccountSnapshot(
+    val accountCurrency: String,
+    val cashBalance: Double?
+)
+
 private fun fetchTrading212Portfolio(): Trading212Portfolio {
     val apiKey = BuildConfig.TRADING212_API_KEY
     val baseUrl = "https://live.trading212.com"
     val client = OkHttpClient()
 
-    val accountCurrency = fetchAccountCurrency(client, baseUrl, apiKey)
+    val accountSnapshot = fetchAccountSnapshot(client, baseUrl, apiKey)
+    val accountCurrency = accountSnapshot.accountCurrency
     val positions = fetchPortfolioPositions(client, baseUrl, apiKey)
     val fxProvider = FxRateProvider(client, accountCurrency)
 
@@ -43,10 +61,22 @@ private fun fetchTrading212Portfolio(): Trading212Portfolio {
         holdings += Holding(ticker, value)
     }
 
+    val cashBalance = accountSnapshot.cashBalance ?: fetchCashBalance(client, baseUrl, apiKey, accountCurrency)
+    if (cashBalance != null) {
+        val formattedCash = String.format(Locale.US, "%.2f", cashBalance)
+        Log.i(
+            TAG,
+            "Trading212 cash balance detected: $formattedCash ${accountCurrency.uppercase(Locale.US)}"
+        )
+        holdings += Holding("Cash", cashBalance)
+    } else {
+        Log.i(TAG, "No Trading212 cash balance found in account info or cash endpoint")
+    }
+
     return Trading212Portfolio(accountCurrency, holdings)
 }
 
-private fun fetchAccountCurrency(client: OkHttpClient, baseUrl: String, apiKey: String): String {
+private fun fetchAccountSnapshot(client: OkHttpClient, baseUrl: String, apiKey: String): AccountSnapshot {
     val infoReq = Request.Builder()
         .url("$baseUrl/api/v0/equity/account/info")
         .addHeader("Authorization", apiKey)
@@ -61,33 +91,23 @@ private fun fetchAccountCurrency(client: OkHttpClient, baseUrl: String, apiKey: 
     }
 
     if (infoJson.isBlank()) {
-        return "EUR"
+        return AccountSnapshot("EUR", null)
     }
 
     return try {
         val info = JSONObject(infoJson)
-        val directFields = listOf(
-            info.optStringOrNull("accountCurrencyCode"),
-            info.optStringOrNull("currencyCode"),
-            info.optStringOrNull("accountCurrency"),
-            info.optStringOrNull("currency")
-        )
-        for (field in directFields) {
-            if (!field.isNullOrBlank()) {
-                return field.uppercase(Locale.US)
-            }
+        val currency = extractAccountCurrency(info) ?: "EUR"
+        val cash = extractCashBalance(info)
+        if (cash != null) {
+            val formattedCash = String.format(Locale.US, "%.2f", cash)
+            Log.i(TAG, "Trading212 account info cash balance: $formattedCash ${currency.uppercase(Locale.US)}")
+        } else {
+            Log.i(TAG, "No cash balance found in Trading212 account info response")
         }
-
-        info.optJSONObject("accountCurrency")?.let { nested ->
-            parseCurrency(nested)?.let { return it.uppercase(Locale.US) }
-        }
-
-        parseCurrency(info)?.let { return it.uppercase(Locale.US) }
-
-        "EUR"
+        AccountSnapshot(currency, cash)
     } catch (e: Exception) {
         Log.w(TAG, "Failed to parse Trading212 account info response", e)
-        "EUR"
+        AccountSnapshot("EUR", null)
     }
 }
 
@@ -106,6 +126,170 @@ private fun fetchPortfolioPositions(client: OkHttpClient, baseUrl: String, apiKe
     }
     Log.d(TAG, "Trading212 portfolio response: $portJson")
     return JSONArray(portJson)
+}
+
+private fun fetchCashBalance(
+    client: OkHttpClient,
+    baseUrl: String,
+    apiKey: String,
+    accountCurrency: String
+): Double? {
+    val request = Request.Builder()
+        .url("$baseUrl/api/v0/equity/account/cash")
+        .addHeader("Authorization", apiKey)
+        .get()
+        .build()
+
+    Log.i(TAG, "Requesting Trading212 cash balance from cash endpoint")
+
+    return try {
+        client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                Log.w(TAG, "Trading212 cash endpoint responded ${resp.code}")
+                return null
+            }
+
+            val body = resp.body?.string().orEmpty()
+            if (body.isBlank()) {
+                Log.w(TAG, "Trading212 cash endpoint returned empty body")
+                return null
+            }
+
+            val json = JSONObject(body)
+            val cash = extractCashBalance(json)
+            if (cash != null) {
+                val formattedCash = String.format(Locale.US, "%.2f", cash)
+                Log.i(TAG, "Trading212 cash endpoint balance: $formattedCash ${accountCurrency.uppercase(Locale.US)}")
+            } else {
+                Log.w(TAG, "Trading212 cash endpoint response missing cash balance")
+            }
+            cash
+        }
+    } catch (e: IOException) {
+        Log.w(TAG, "Trading212 cash endpoint request error", e)
+        null
+    } catch (e: Exception) {
+        Log.w(TAG, "Unable to parse Trading212 cash endpoint response", e)
+        null
+    }
+}
+
+private fun extractAccountCurrency(info: JSONObject): String? {
+    val directFields = listOf(
+        info.optStringOrNull("accountCurrencyCode"),
+        info.optStringOrNull("currencyCode"),
+        info.optStringOrNull("accountCurrency"),
+        info.optStringOrNull("currency")
+    )
+    for (field in directFields) {
+        if (!field.isNullOrBlank()) {
+            return field.uppercase(Locale.US)
+        }
+    }
+
+    info.optJSONObject("accountCurrency")?.let { nested ->
+        parseCurrency(nested)?.let { return it.uppercase(Locale.US) }
+    }
+
+    parseCurrency(info)?.let { return it.uppercase(Locale.US) }
+
+    val candidateContainers = listOf("account", "summary", "balances", "accountSummary", "profile")
+    for (key in candidateContainers) {
+        when (val value = info.opt(key)) {
+            is JSONObject -> parseCurrency(value)?.let { return it.uppercase(Locale.US) }
+            is JSONArray -> {
+                for (i in 0 until value.length()) {
+                    val item = value.opt(i)
+                    if (item is JSONObject) {
+                        parseCurrency(item)?.let { return it.uppercase(Locale.US) }
+                    }
+                }
+            }
+        }
+    }
+
+    return null
+}
+
+private fun extractCashBalance(root: JSONObject): Double? {
+    val queue: ArrayDeque<Any> = ArrayDeque()
+    val visited = mutableSetOf<Int>()
+    queue += root
+
+    while (queue.isNotEmpty()) {
+        when (val node = queue.removeFirst()) {
+            is JSONObject -> {
+                val identity = System.identityHashCode(node)
+                if (!visited.add(identity)) {
+                    continue
+                }
+
+                val typeValue = node.optStringOrNull("type")
+                    ?: node.optStringOrNull("name")
+                    ?: node.optStringOrNull("category")
+                if (!typeValue.isNullOrBlank() && typeValue.uppercase(Locale.US).contains("CASH")) {
+                    val typeCandidates = listOf("value", "amount", "balance", "cash", "available", "free")
+                    for (candidateKey in typeCandidates) {
+                        parseCashCandidate(node.opt(candidateKey))?.let { return it }
+                    }
+                }
+
+                val keys = node.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val value = node.opt(key)
+                    val normalizedKey = key.trim().uppercase(Locale.US)
+                    if (CASH_KEYWORDS.any { normalizedKey.contains(it) }) {
+                        parseCashCandidate(value)?.let { return it }
+                    }
+
+                    if (value is JSONObject || value is JSONArray) {
+                        queue += value
+                    }
+                }
+            }
+
+            is JSONArray -> {
+                val identity = System.identityHashCode(node)
+                if (!visited.add(identity)) {
+                    continue
+                }
+                for (i in 0 until node.length()) {
+                    val item = node.opt(i)
+                    if (item is JSONObject || item is JSONArray) {
+                        queue += item
+                    } else {
+                        parseCashCandidate(item)?.let { return it }
+                    }
+                }
+            }
+        }
+    }
+
+    return null
+}
+
+private fun parseCashCandidate(value: Any?): Double? {
+    return when (value) {
+        null -> null
+        is Number -> value.toDouble()
+        is String -> value.toDoubleOrNull()
+        is JSONObject -> {
+            parseDouble(value)?.let { return it }
+            val nestedKeys = listOf("balance", "amount", "cash", "available", "free", "total", "value")
+            for (key in nestedKeys) {
+                parseDouble(value.opt(key))?.let { return it }
+            }
+            null
+        }
+        is JSONArray -> {
+            for (i in 0 until value.length()) {
+                parseCashCandidate(value.opt(i))?.let { return it }
+            }
+            null
+        }
+        else -> null
+    }
 }
 
 private fun extractTicker(position: JSONObject): String {
@@ -206,7 +390,7 @@ private class FxRateProvider(
 
     private fun fetchUsdRate(): Double {
         val fetchers = listOf(
-            "ExchangeRateHost" to ::fetchFromExchangeRateHost,
+            "ER-API" to ::fetchFromOpenErApi,
             "Frankfurter" to ::fetchFromFrankfurter
         )
 
@@ -224,9 +408,9 @@ private class FxRateProvider(
         throw IOException("Unable to fetch FX rate from USD to $targetCurrency")
     }
 
-    private fun fetchFromExchangeRateHost(): Double? {
-        val url = "https://api.exchangerate.host/convert?from=USD&to=$targetCurrency"
-        Log.i(TAG, "Requesting FX rate USD->$targetCurrency from ExchangeRateHost")
+    private fun fetchFromOpenErApi(): Double? {
+        val url = "https://open.er-api.com/v6/latest/USD"
+        Log.i(TAG, "Requesting FX rate USD->$targetCurrency from ER-API")
         val request = Request.Builder()
             .url(url)
             .get()
@@ -235,39 +419,47 @@ private class FxRateProvider(
         return try {
             client.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    Log.w(TAG, "FX rate retrieval failed: ExchangeRateHost responded ${resp.code}")
+                    Log.w(TAG, "FX rate retrieval failed: ER-API responded ${resp.code}")
                     return null
                 }
 
                 val body = resp.body?.string().orEmpty()
                 if (body.isBlank()) {
-                    Log.w(TAG, "FX rate retrieval failed: ExchangeRateHost returned empty body")
+                    Log.w(TAG, "FX rate retrieval failed: ER-API returned empty body")
                     return null
                 }
 
                 val json = JSONObject(body)
-                val result = json.optDouble("result", Double.NaN)
-                if (!result.isNaN() && result > 0) {
-                    Log.i(TAG, "ExchangeRateHost result for USD->$targetCurrency: $result")
-                    return result
+                val result = json.optString("result")?.uppercase(Locale.US)
+                if (result != null && result != "SUCCESS") {
+                    val errorType = json.optString("error-type")
+                    Log.w(TAG, "FX rate retrieval failed: ER-API reported $result (${errorType.orEmpty()})")
+                    return null
                 }
 
-                val infoRate = json.optJSONObject("info")?.optDouble("rate")?.takeIf { !it.isNaN() && it > 0 }
-                if (infoRate != null) {
-                    Log.i(TAG, "ExchangeRateHost info rate for USD->$targetCurrency: $infoRate")
-                } else {
-                    Log.w(
-                        TAG,
-                        "FX rate retrieval failed: ExchangeRateHost response missing rate for USD->$targetCurrency"
-                    )
+                val rates = json.optJSONObject("rates")
+                if (rates == null) {
+                    Log.w(TAG, "FX rate retrieval failed: ER-API response missing rates for USD->$targetCurrency")
+                    return null
                 }
-                infoRate
+
+                val rate = rates.optDouble(targetCurrency, Double.NaN)
+                if (!rate.isNaN() && rate > 0) {
+                    Log.i(TAG, "ER-API rate for USD->$targetCurrency: $rate")
+                    return rate
+                }
+
+                Log.w(
+                    TAG,
+                    "FX rate retrieval failed: ER-API response missing rate for USD->$targetCurrency"
+                )
+                null
             }
         } catch (e: IOException) {
-            Log.w(TAG, "FX rate retrieval failed: ExchangeRateHost request error", e)
+            Log.w(TAG, "FX rate retrieval failed: ER-API request error", e)
             null
         } catch (e: Exception) {
-            Log.w(TAG, "FX rate retrieval failed: unable to parse ExchangeRateHost response", e)
+            Log.w(TAG, "FX rate retrieval failed: unable to parse ER-API response", e)
             null
         }
     }
