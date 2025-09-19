@@ -11,16 +11,13 @@ import java.util.Locale
 
 private const val TAG = "Trading212Api"
 private val CASH_KEYWORDS = listOf(
-    "CASH",
-    "FREEFUNDS",
-    "AVAILABLEFUNDS",
-    "AVAILABLECASH",
-    "FREECASH",
-    "TOTALCASH",
-    "CASHBALANCE",
-    "CASHVALUE",
-    "LIQUIDFUNDS",
-    "UNINVESTED"
+    "BLOCKED",
+    "FREE",
+    "INVESTED",
+    "PIECASH",
+    "PPL",
+    "RESULT",
+    "TOTAL"
 )
 
 fun fetchTrading212TotalValue(): String {
@@ -182,21 +179,18 @@ private fun parseCashEndpointBalance(json: JSONObject): Double? {
         }
     }
 
-    val preferredKeys = listOf("total", "free")
-    for (key in preferredKeys) {
-        json.optParsedDouble(key)?.let { return it }
+    val prioritizedKeys = arrayOf("free", "total")
+    json.optParsedDouble(*prioritizedKeys)?.let { return it }
+
+    val containerKeys = listOf("cash", "pieCash")
+    for (containerKey in containerKeys) {
+        parseCashCandidate(json.opt(containerKey))?.let { return it }
     }
 
-    json.optJSONObject("cash")?.let { cashObject ->
-        for (key in preferredKeys) {
-            cashObject.optParsedDouble(key)?.let { return it }
-        }
-    }
-
-    val fallbackKeys = listOf("balance", "available", "amount", "value", "cash")
+    val fallbackKeys = listOf("available", "balance", "amount", "value")
     for (key in fallbackKeys) {
         json.optParsedDouble(key)?.let { return it }
-        json.optJSONObject(key)?.optParsedDouble("total", "free")?.let { return it }
+        parseCashCandidate(json.opt(key))?.let { return it }
     }
 
     return null
@@ -256,7 +250,7 @@ private fun extractCashBalance(root: JSONObject): Double? {
                     ?: node.optStringOrNull("name")
                     ?: node.optStringOrNull("category")
                 if (!typeValue.isNullOrBlank() && typeValue.uppercase(Locale.US).contains("CASH")) {
-                    val typeCandidates = listOf("value", "amount", "balance", "cash", "available", "free")
+                    val typeCandidates = listOf("free", "available", "value", "amount", "balance", "cash", "total")
                     for (candidateKey in typeCandidates) {
                         parseCashCandidate(node.opt(candidateKey))?.let { return it }
                     }
@@ -304,7 +298,7 @@ private fun parseCashCandidate(value: Any?): Double? {
         is String -> value.toDoubleOrNull()
         is JSONObject -> {
             parseDouble(value)?.let { return it }
-            val nestedKeys = listOf("balance", "amount", "cash", "available", "free", "total", "value")
+            val nestedKeys = listOf("free", "available", "balance", "amount", "cash", "total", "value")
             for (key in nestedKeys) {
                 parseDouble(value.opt(key))?.let { return it }
             }
