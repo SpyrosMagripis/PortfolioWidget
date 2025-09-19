@@ -33,7 +33,7 @@ private fun fetchTrading212Portfolio(): Trading212Portfolio {
 
     val accountCurrency = fetchAccountCurrency(client, baseUrl, apiKey)
     val positions = fetchPortfolioPositions(client, baseUrl, apiKey)
-    val fxProvider = FxRateProvider(client, accountCurrency)
+    val fxProvider = FxRateProvider(client, baseUrl, apiKey, accountCurrency)
 
     val holdings = mutableListOf<Holding>()
     for (i in 0 until positions.length()) {
@@ -129,12 +129,25 @@ private fun computePositionValueInAccountCurrency(
     }
 
     val accountCurrencyUpper = accountCurrency.uppercase(Locale.US)
-    val instrumentCurrency = (
-        position.optCurrency("valueCurrencyCode", "currencyCode", "currency")
-            ?: position.optJSONObject("currentPrice")?.let { parseCurrency(it) }
-            ?: position.optJSONObject("price")?.let { parseCurrency(it) }
-            ?: accountCurrencyUpper
-        ).uppercase(Locale.US)
+    val instrumentCurrency = listOfNotNull(
+        position.optStringOrNull("valueCurrencyCode"),
+        position.optStringOrNull("currencyCode"),
+        position.optStringOrNull("currency"),
+        position.optStringOrNull("instrumentCurrency"),
+        position.optStringOrNull("fxCurrency"),
+        position.optStringOrNull("valueCurrency"),
+        position.optStringOrNull("currentValueCurrency"),
+        position.optValue("value")?.let { parseCurrency(it) },
+        position.optValue("currentValue")?.let { parseCurrency(it) },
+        position.optValue("marketValue")?.let { parseCurrency(it) },
+        position.optValue("valuation")?.let { parseCurrency(it) },
+        position.optValue("currentPrice")?.let { parseCurrency(it) },
+        position.optValue("price")?.let { parseCurrency(it) },
+        position.optValue("lastPrice")?.let { parseCurrency(it) },
+        position.optValue("averagePrice")?.let { parseCurrency(it) },
+        position.optValue("avgPrice")?.let { parseCurrency(it) },
+        findCurrencyRecursively(position)
+    ).firstOrNull()?.uppercase(Locale.US) ?: accountCurrencyUpper
 
     val instrumentValue = position.optParsedDouble("value", "currentValue", "marketValue", "valuation")
         ?: run {
@@ -144,6 +157,16 @@ private fun computePositionValueInAccountCurrency(
                 ?: 0.0
             quantity * price
         }
+
+    if (instrumentCurrency != accountCurrencyUpper) {
+        Log.i(
+            TAG,
+            "Preparing conversion for $ticker: ${String.format(Locale.US, "%.2f", instrumentValue)} " +
+                "$instrumentCurrency -> $accountCurrencyUpper"
+        )
+    } else {
+        Log.d(TAG, "Using account currency for $ticker: $accountCurrencyUpper")
+    }
 
     if (instrumentCurrency == accountCurrencyUpper) {
         return instrumentValue
@@ -165,6 +188,8 @@ private fun formatAccountValue(amount: Double, currencyCode: String): String {
 
 private class FxRateProvider(
     private val client: OkHttpClient,
+    private val baseUrl: String,
+    private val apiKey: String,
     accountCurrency: String
 ) {
     private val targetCurrency = accountCurrency.uppercase(Locale.US)
@@ -186,23 +211,115 @@ private class FxRateProvider(
         }
 
         val converted = amount * rate
-        if (source == "USD" && targetCurrency == "EUR") {
-            val formattedAmount = String.format(Locale.US, "%.2f", amount)
-            val formattedConverted = String.format(Locale.US, "%.2f", converted)
-            val formattedRate = String.format(Locale.US, "%.6f", rate)
-            Log.i(
-                TAG,
-                "Converted $ticker: $formattedAmount USD -> $formattedConverted EUR at rate $formattedRate"
-            )
-        }
+        val formattedAmount = String.format(Locale.US, "%.2f", amount)
+        val formattedConverted = String.format(Locale.US, "%.2f", converted)
+        val formattedRate = String.format(Locale.US, "%.6f", rate)
+        Log.i(
+            TAG,
+            "Converted $ticker: $formattedAmount $source -> $formattedConverted $targetCurrency at rate $formattedRate"
+        )
         return converted
     }
 
     private fun fetchRate(fromCurrency: String): Double {
+        fetchFromTrading212(fromCurrency)?.let { rate ->
+            Log.i(
+                TAG,
+                "FX rate retrieval successful via Trading212: $fromCurrency->$targetCurrency = $rate"
+            )
+            return rate
+        }
+
         val rate = fetchFromExchangeRateHost(fromCurrency)
             ?: throw IOException("Unable to fetch FX rate from $fromCurrency to $targetCurrency")
-        Log.i(TAG, "FX rate retrieval successful: $fromCurrency->$targetCurrency = $rate")
+        Log.i(
+            TAG,
+            "FX rate retrieval successful via ExchangeRateHost: $fromCurrency->$targetCurrency = $rate"
+        )
         return rate
+    }
+
+    private fun fetchFromTrading212(fromCurrency: String): Double? {
+        val pair = "${fromCurrency.uppercase(Locale.US)}$targetCurrency"
+        val endpoints = listOf(
+            "$baseUrl/api/v0/equity/fx/rate?from=$fromCurrency&to=$targetCurrency",
+            "$baseUrl/api/v0/equity/fx/rates/$pair",
+            "$baseUrl/api/v0/equity/prices?tickers=$pair",
+            "$baseUrl/api/v0/equity/prices/$pair"
+        )
+
+        for (endpoint in endpoints) {
+            val request = Request.Builder()
+                .url(endpoint)
+                .addHeader("Authorization", apiKey)
+                .get()
+                .build()
+
+            try {
+                client.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        Log.d(
+                            TAG,
+                            "Trading212 FX endpoint $endpoint responded with ${resp.code}"
+                        )
+                        return@use
+                    }
+
+                    val body = resp.body?.string().orEmpty()
+                    if (body.isBlank()) {
+                        Log.d(TAG, "Trading212 FX endpoint $endpoint returned empty body")
+                        return@use
+                    }
+
+                    val rate = parseRateResponse(body)
+                    if (rate != null && rate > 0) {
+                        Log.i(TAG, "Trading212 FX endpoint $endpoint yielded rate $rate")
+                        return rate
+                    } else {
+                        Log.d(
+                            TAG,
+                            "Unable to parse FX rate from Trading212 endpoint $endpoint: $body"
+                        )
+                    }
+                }
+            } catch (e: IOException) {
+                Log.d(TAG, "Trading212 FX request failed for $endpoint", e)
+            } catch (e: Exception) {
+                Log.d(TAG, "Unexpected error parsing Trading212 FX response from $endpoint", e)
+            }
+        }
+
+        return null
+    }
+
+    private fun parseRateResponse(body: String): Double? {
+        val trimmed = body.trim()
+        if (trimmed.isEmpty()) {
+            return null
+        }
+
+        return try {
+            when {
+                trimmed.startsWith("{") -> parseDouble(JSONObject(trimmed))
+                trimmed.startsWith("[") -> {
+                    val array = JSONArray(trimmed)
+                    var idx = 0
+                    while (idx < array.length()) {
+                        val candidate = array.opt(idx)
+                        val rate = parseDouble(candidate)
+                        if (rate != null && rate > 0) {
+                            return rate
+                        }
+                        idx++
+                    }
+                    null
+                }
+                else -> trimmed.toDoubleOrNull()
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Failed to parse FX rate body: $trimmed", e)
+            null
+        }
     }
 
     private fun fetchFromExchangeRateHost(fromCurrency: String): Double? {
@@ -259,6 +376,18 @@ private fun JSONObject.optStringOrNull(key: String): String? {
     return value.takeIf { it.isNotBlank() }
 }
 
+private fun JSONObject.optValue(vararg keys: String): Any? {
+    for (key in keys) {
+        if (has(key)) {
+            val value = opt(key)
+            if (value != null && value != JSONObject.NULL) {
+                return value
+            }
+        }
+    }
+    return null
+}
+
 private fun JSONObject.optParsedDouble(vararg keys: String): Double? {
     for (key in keys) {
         if (has(key)) {
@@ -296,7 +425,11 @@ private fun parseDouble(value: Any?): Double? {
                 "last",
                 "lastPrice",
                 "close",
-                "closePrice"
+                "closePrice",
+                "rate",
+                "fxRate",
+                "conversionRate",
+                "exchangeRate"
             )
             for (key in candidateKeys) {
                 parseDouble(value.opt(key))?.let { return it }
@@ -318,6 +451,33 @@ private fun parseCurrency(value: Any?): String? {
             val candidateKeys = listOf("currencyCode", "code", "currency")
             for (key in candidateKeys) {
                 parseCurrency(value.opt(key))?.let { return it }
+            }
+            null
+        }
+        else -> null
+    }
+}
+
+private fun findCurrencyRecursively(value: Any?): String? {
+    parseCurrency(value)?.let { return it }
+    return when (value) {
+        is JSONObject -> {
+            val keys = value.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val nested = value.opt(key)
+                if (nested != null && nested != JSONObject.NULL) {
+                    findCurrencyRecursively(nested)?.let { return it }
+                }
+            }
+            null
+        }
+        is JSONArray -> {
+            for (index in 0 until value.length()) {
+                val nested = value.opt(index)
+                if (nested != null && nested != JSONObject.NULL) {
+                    findCurrencyRecursively(nested)?.let { return it }
+                }
             }
             null
         }
