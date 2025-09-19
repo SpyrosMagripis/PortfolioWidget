@@ -11,67 +11,6 @@ import java.util.Locale
 
 private const val TAG = "Trading212Api"
 
-private val COUNTRY_TO_CURRENCY = mapOf(
-    "US" to "USD",
-    "CA" to "CAD",
-    "GB" to "GBP",
-    "UK" to "GBP",
-    "IE" to "EUR",
-    "DE" to "EUR",
-    "FR" to "EUR",
-    "NL" to "EUR",
-    "BE" to "EUR",
-    "ES" to "EUR",
-    "IT" to "EUR",
-    "PT" to "EUR",
-    "AT" to "EUR",
-    "FI" to "EUR",
-    "GR" to "EUR",
-    "LU" to "EUR",
-    "LT" to "EUR",
-    "LV" to "EUR",
-    "EE" to "EUR",
-    "CY" to "EUR",
-    "MT" to "EUR",
-    "SK" to "EUR",
-    "SI" to "EUR",
-    "CH" to "CHF",
-    "SE" to "SEK",
-    "NO" to "NOK",
-    "DK" to "DKK",
-    "PL" to "PLN",
-    "CZ" to "CZK",
-    "HU" to "HUF",
-    "RO" to "RON",
-    "BG" to "BGN",
-    "HR" to "EUR",
-    "IS" to "ISK",
-    "JP" to "JPY",
-    "HK" to "HKD",
-    "SG" to "SGD",
-    "CN" to "CNY",
-    "KR" to "KRW",
-    "IN" to "INR",
-    "AU" to "AUD",
-    "NZ" to "NZD",
-    "ZA" to "ZAR",
-    "BR" to "BRL",
-    "MX" to "MXN",
-    "TR" to "TRY",
-    "IL" to "ILS",
-    "AE" to "AED",
-    "SA" to "SAR",
-    "QA" to "QAR",
-    "KW" to "KWD",
-    "BH" to "BHD",
-    "AR" to "ARS",
-    "CL" to "CLP",
-    "ID" to "IDR",
-    "MY" to "MYR",
-    "TH" to "THB",
-    "PH" to "PHP"
-)
-
 fun fetchTrading212TotalValue(): String {
     val portfolio = fetchTrading212Portfolio()
     val total = portfolio.holdings.sumOf { it.value }
@@ -177,31 +116,6 @@ private fun extractTicker(position: JSONObject): String {
         ?: "Unknown"
 }
 
-private fun inferCurrencyFromTicker(ticker: String?): String? {
-    if (ticker.isNullOrBlank()) {
-        return null
-    }
-
-    val normalized = ticker.uppercase(Locale.US)
-    val separators = charArrayOf('_', '-', '.', ' ')
-    val parts = normalized.split(*separators).filter { it.isNotBlank() }
-
-    for (part in parts) {
-        COUNTRY_TO_CURRENCY[part]?.let { return it }
-        if (looksLikeCurrencyCode(part)) {
-            return part
-        }
-    }
-
-    COUNTRY_TO_CURRENCY.entries.firstOrNull { (country, _) ->
-        normalized.contains("_${country}_") ||
-            normalized.endsWith("_${country}") ||
-            normalized.startsWith("${country}_")
-    }?.let { return it.value }
-
-    return null
-}
-
 private fun computePositionValueInAccountCurrency(
     position: JSONObject,
     accountCurrency: String,
@@ -214,40 +128,6 @@ private fun computePositionValueInAccountCurrency(
         parseDouble(nested)?.let { return it }
     }
 
-    val accountCurrencyUpper = accountCurrency.uppercase(Locale.US)
-    val tickerCurrency = inferCurrencyFromTicker(ticker)?.uppercase(Locale.US)
-    val metadataCurrency = listOfNotNull(
-        position.optStringOrNull("valueCurrencyCode"),
-        position.optStringOrNull("currencyCode"),
-        position.optStringOrNull("currency"),
-        position.optStringOrNull("instrumentCurrency"),
-        position.optStringOrNull("fxCurrency"),
-        position.optStringOrNull("valueCurrency"),
-        position.optStringOrNull("currentValueCurrency"),
-        position.optValue("value")?.let { parseCurrency(it) },
-        position.optValue("currentValue")?.let { parseCurrency(it) },
-        position.optValue("marketValue")?.let { parseCurrency(it) },
-        position.optValue("valuation")?.let { parseCurrency(it) },
-        position.optValue("currentPrice")?.let { parseCurrency(it) },
-        position.optValue("price")?.let { parseCurrency(it) },
-        position.optValue("lastPrice")?.let { parseCurrency(it) },
-        position.optValue("averagePrice")?.let { parseCurrency(it) },
-        position.optValue("avgPrice")?.let { parseCurrency(it) },
-        findCurrencyRecursively(position)
-    ).firstOrNull()?.uppercase(Locale.US)
-
-    val rawCurrency = tickerCurrency ?: metadataCurrency
-    val instrumentCurrency = rawCurrency?.takeIf { looksLikeCurrencyCode(it) } ?: accountCurrencyUpper
-    val detectionSource = when {
-        tickerCurrency != null -> "ticker"
-        metadataCurrency != null -> "position metadata"
-        else -> "account currency default"
-    }
-    Log.d(
-        TAG,
-        "Detected currency for $ticker via $detectionSource: $instrumentCurrency (account $accountCurrencyUpper)"
-    )
-
     val instrumentValue = position.optParsedDouble("value", "currentValue", "marketValue", "valuation")
         ?: run {
             val quantity = position.optParsedDouble("quantity") ?: 0.0
@@ -257,18 +137,26 @@ private fun computePositionValueInAccountCurrency(
             quantity * price
         }
 
-    if (instrumentCurrency != accountCurrencyUpper) {
+    val accountCurrencyUpper = accountCurrency.uppercase(Locale.US)
+    val tickerUpper = ticker.uppercase(Locale.US)
+    val requiresUsdConversion = tickerUpper.contains("US") && accountCurrencyUpper != "USD"
+
+    if (requiresUsdConversion) {
         Log.i(
             TAG,
-            "Preparing conversion for $ticker: ${String.format(Locale.US, "%.2f", instrumentValue)} " +
-                "$instrumentCurrency -> $accountCurrencyUpper"
+            "Preparing conversion for $ticker: ${String.format(Locale.US, "%.2f", instrumentValue)} USD -> $accountCurrencyUpper"
         )
-        return fxProvider.convert(instrumentValue, instrumentCurrency, ticker)
+        return fxProvider.convertUsdToAccount(instrumentValue, ticker)
     }
 
+    val reason = if (tickerUpper.contains("US")) {
+        "account currency already USD"
+    } else {
+        "ticker has no US segment"
+    }
     Log.i(
         TAG,
-        "No FX conversion required for $ticker: ${String.format(Locale.US, "%.2f", instrumentValue)} $accountCurrencyUpper"
+        "No USD conversion required for $ticker ($reason): ${String.format(Locale.US, "%.2f", instrumentValue)} $accountCurrencyUpper"
     )
     return instrumentValue
 }
@@ -289,28 +177,20 @@ private class FxRateProvider(
     accountCurrency: String
 ) {
     private val targetCurrency = accountCurrency.uppercase(Locale.US)
-    private val cache = mutableMapOf<String, Double>()
+    private var usdToTargetRate: Double? = null
 
-    fun convert(amount: Double, fromCurrency: String, ticker: String): Double {
-        if (amount == 0.0) {
-            return 0.0
-        }
-        val source = fromCurrency.uppercase(Locale.US)
-        if (!looksLikeCurrencyCode(source)) {
-            Log.w(
-                TAG,
-                "Skipping FX conversion for $ticker: invalid currency code '$source'"
-            )
-            return amount
-        }
-        if (source == targetCurrency || source.isBlank()) {
+    fun convertUsdToAccount(amount: Double, ticker: String): Double {
+        if (amount == 0.0 || targetCurrency == "USD") {
+            if (targetCurrency == "USD") {
+                Log.i(TAG, "Account currency is USD; skipping conversion for $ticker")
+            }
             return amount
         }
 
-        val rate = cache[source]?.also {
-            Log.i(TAG, "Using cached FX rate $source->$targetCurrency = $it for $ticker")
-        } ?: fetchRate(source).also { fetchedRate ->
-            cache[source] = fetchedRate
+        val rate = usdToTargetRate?.also {
+            Log.i(TAG, "Using cached FX rate USD->$targetCurrency = $it for $ticker")
+        } ?: fetchUsdRate().also { fetchedRate ->
+            usdToTargetRate = fetchedRate
         }
 
         val converted = amount * rate
@@ -319,34 +199,34 @@ private class FxRateProvider(
         val formattedRate = String.format(Locale.US, "%.6f", rate)
         Log.i(
             TAG,
-            "Converted $ticker: $formattedAmount $source -> $formattedConverted $targetCurrency at rate $formattedRate"
+            "Converted $ticker: $formattedAmount USD -> $formattedConverted $targetCurrency at rate $formattedRate"
         )
         return converted
     }
 
-    private fun fetchRate(fromCurrency: String): Double {
+    private fun fetchUsdRate(): Double {
         val fetchers = listOf(
             "ExchangeRateHost" to ::fetchFromExchangeRateHost,
             "Frankfurter" to ::fetchFromFrankfurter
         )
 
         for ((name, fetcher) in fetchers) {
-            val rate = fetcher(fromCurrency)
+            val rate = fetcher()
             if (rate != null) {
                 Log.i(
                     TAG,
-                    "FX rate retrieval successful via $name: $fromCurrency->$targetCurrency = $rate"
+                    "FX rate retrieval successful via $name: USD->$targetCurrency = $rate"
                 )
                 return rate
             }
         }
 
-        throw IOException("Unable to fetch FX rate from $fromCurrency to $targetCurrency")
+        throw IOException("Unable to fetch FX rate from USD to $targetCurrency")
     }
 
-    private fun fetchFromExchangeRateHost(fromCurrency: String): Double? {
-        val url = "https://api.exchangerate.host/convert?from=$fromCurrency&to=$targetCurrency"
-        Log.i(TAG, "Requesting FX rate $fromCurrency->$targetCurrency from ExchangeRateHost")
+    private fun fetchFromExchangeRateHost(): Double? {
+        val url = "https://api.exchangerate.host/convert?from=USD&to=$targetCurrency"
+        Log.i(TAG, "Requesting FX rate USD->$targetCurrency from ExchangeRateHost")
         val request = Request.Builder()
             .url(url)
             .get()
@@ -368,17 +248,17 @@ private class FxRateProvider(
                 val json = JSONObject(body)
                 val result = json.optDouble("result", Double.NaN)
                 if (!result.isNaN() && result > 0) {
-                    Log.i(TAG, "ExchangeRateHost result for $fromCurrency->$targetCurrency: $result")
+                    Log.i(TAG, "ExchangeRateHost result for USD->$targetCurrency: $result")
                     return result
                 }
 
                 val infoRate = json.optJSONObject("info")?.optDouble("rate")?.takeIf { !it.isNaN() && it > 0 }
                 if (infoRate != null) {
-                    Log.i(TAG, "ExchangeRateHost info rate for $fromCurrency->$targetCurrency: $infoRate")
+                    Log.i(TAG, "ExchangeRateHost info rate for USD->$targetCurrency: $infoRate")
                 } else {
                     Log.w(
                         TAG,
-                        "FX rate retrieval failed: ExchangeRateHost response missing rate for $fromCurrency->$targetCurrency"
+                        "FX rate retrieval failed: ExchangeRateHost response missing rate for USD->$targetCurrency"
                     )
                 }
                 infoRate
@@ -392,9 +272,9 @@ private class FxRateProvider(
         }
     }
 
-    private fun fetchFromFrankfurter(fromCurrency: String): Double? {
-        val url = "https://api.frankfurter.app/latest?from=$fromCurrency&to=$targetCurrency"
-        Log.i(TAG, "Requesting FX rate $fromCurrency->$targetCurrency from Frankfurter")
+    private fun fetchFromFrankfurter(): Double? {
+        val url = "https://api.frankfurter.app/latest?from=USD&to=$targetCurrency"
+        Log.i(TAG, "Requesting FX rate USD->$targetCurrency from Frankfurter")
         val request = Request.Builder()
             .url(url)
             .get()
@@ -416,19 +296,19 @@ private class FxRateProvider(
                 val json = JSONObject(body)
                 val rates = json.optJSONObject("rates")
                 if (rates == null) {
-                    Log.w(TAG, "FX rate retrieval failed: Frankfurter response missing rates for $fromCurrency->$targetCurrency")
+                    Log.w(TAG, "FX rate retrieval failed: Frankfurter response missing rates for USD->$targetCurrency")
                     return null
                 }
 
                 val rate = rates.optDouble(targetCurrency, Double.NaN)
                 if (!rate.isNaN() && rate > 0) {
-                    Log.i(TAG, "Frankfurter rate for $fromCurrency->$targetCurrency: $rate")
+                    Log.i(TAG, "Frankfurter rate for USD->$targetCurrency: $rate")
                     return rate
                 }
 
                 Log.w(
                     TAG,
-                    "FX rate retrieval failed: Frankfurter response missing rate for $fromCurrency->$targetCurrency"
+                    "FX rate retrieval failed: Frankfurter response missing rate for USD->$targetCurrency"
                 )
                 null
             }
@@ -441,7 +321,6 @@ private class FxRateProvider(
         }
     }
 }
-
 private fun JSONObject.optStringOrNull(key: String): String? {
     val value = optString(key, "")
     return value.takeIf { it.isNotBlank() }
@@ -463,15 +342,6 @@ private fun JSONObject.optParsedDouble(vararg keys: String): Double? {
     for (key in keys) {
         if (has(key)) {
             parseDouble(opt(key))?.let { return it }
-        }
-    }
-    return null
-}
-
-private fun JSONObject.optCurrency(vararg keys: String): String? {
-    for (key in keys) {
-        if (has(key)) {
-            parseCurrency(opt(key))?.let { return it }
         }
     }
     return null
@@ -559,33 +429,6 @@ private fun looksLikeCurrencyCode(value: String): Boolean {
         true
     } catch (e: IllegalArgumentException) {
         normalized == "GBX"
-    }
-}
-
-private fun findCurrencyRecursively(value: Any?): String? {
-    parseCurrency(value)?.let { return it }
-    return when (value) {
-        is JSONObject -> {
-            val keys = value.keys()
-            while (keys.hasNext()) {
-                val key = keys.next()
-                val nested = value.opt(key)
-                if (nested != null && nested != JSONObject.NULL) {
-                    findCurrencyRecursively(nested)?.let { return it }
-                }
-            }
-            null
-        }
-        is JSONArray -> {
-            for (index in 0 until value.length()) {
-                val nested = value.opt(index)
-                if (nested != null && nested != JSONObject.NULL) {
-                    findCurrencyRecursively(nested)?.let { return it }
-                }
-            }
-            null
-        }
-        else -> null
     }
 }
 
